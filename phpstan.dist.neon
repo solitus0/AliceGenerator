@@ -1,0 +1,29 @@
+includes:
+    - vendor/spaze/phpstan-disallowed-calls/extension.neon
+    - vendor/phpstan/phpstan-phpunit/extension.neon
+    - vendor/phpstan/phpstan-strict-rules/rules.neon
+
+parameters:
+    level: 5
+    paths:
+        - src/
+        - tests/
+    excludePaths:
+        - %currentWorkingDirectory%/tests/bootstrap.php
+    disallowedFunctionCalls:
+        -
+            function: dump
+            message: use some logger instead
+        -
+            function: dd
+            message: use some logger instead
+        -
+            function: echo
+            message: use some logger instead
+        -
+            function: print
+            message: use some logger instead
+    strictRules:
+        allRules: false
+        uselessCast: true
+        noVariableVariables: true

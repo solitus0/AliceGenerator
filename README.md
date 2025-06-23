@@ -1,6 +1,6 @@
 # AliceGenerator
 
-[![Packagist Version](https://img.shields.io/packagist/v/solitus0/AliceGenerator.svg)](https://packagist.org/packages/solitus0/AliceGenerator) [![License](https://img.shields.io/github/license/solitus0/AliceGenerator.svg?style=flat-square)](LICENSE)
+[![Packagist Version](https://img.shields.io/packagist/v/solitus0/alice-generator.svg)](https://packagist.org/packages/solitus0/alice-generator) [![License](https://img.shields.io/github/license/solitus0/AliceGenerator.svg?style=flat-square)](LICENSE)
 
 AliceGenerator is a PHP library that generates realistic Alice fixtures from your existing database.
 It integrates seamlessly with Doctrine and provides flexible customization options for naming strategies,
@@ -19,10 +19,6 @@ For a full guide, see the [documentation](docs/index.md).
 - Customizable property namers and reference namers
 - Pluggable object handlers for custom types
 - Fine-grained control over recursion and collection handling
-
-## Credits
-
-Maintained by [Ernestas Pilsudskis](https://github.com/solitus0).
 
 ## License
 

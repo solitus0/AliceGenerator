@@ -20,10 +20,6 @@ For a full guide, see the [documentation](docs/index.md).
 - Pluggable object handlers for custom types
 - Fine-grained control over recursion and collection handling
 
-## Credits
-
-Maintained by [Ernestas Pilsudskis](https://github.com/solitus0).
-
 ## License
 
 This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.

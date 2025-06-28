@@ -22,7 +22,7 @@ class ValueVisitor
 
     private FixtureGenerationContext $generationContext;
 
-    private ?array $results = null;
+    private array $results = [];
 
     private int $recursionDepth = 0;
 
@@ -58,7 +58,7 @@ class ValueVisitor
         $this->generationContext->getConstraintsCollection()->setMetadataHandler($this->handler);
     }
 
-    public function getResults(): ?array
+    public function getResults(): array
     {
         return $this->results;
     }

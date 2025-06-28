@@ -30,7 +30,7 @@ Restrict the number of items in all collections of the `User` entity:
 $context = FixtureGenerationContext::create()
     ->setMaximumRecursion(max: 2)
     ->addPersistedObjectConstraint($entity)
-    ->setCollectionSizeLimit(User::class, 3);
+    ->addCollectionItemLimitPerOwner(User::class, 3);
 ```
 
 ## Conditional Skipping
@@ -41,8 +41,8 @@ Skip individual items in a collection based on a custom callback:
 $context = FixtureGenerationContext::create()
     ->setMaximumRecursion(max: 2)
     ->addPersistedObjectConstraint($entity)
-    ->setCollectionItemSizeLimit(User::class, Notification::class, 5)
-    ->addSkippedCollectionItemCallback(
+    ->addLimitForOwnerItemCollection(User::class, Notification::class, 5)
+    ->addCollectionItemSkipCondition(
         function (string $ownerClass, $item) {
             return $item instanceof Notification && $item->getReadAt() !== null;
         }

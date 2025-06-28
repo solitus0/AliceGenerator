@@ -157,14 +157,14 @@ Control which collections and items are included:
 Skip entire collections for owner classes:
 
 ```php
-$context->addSkippedCollectionOwnerClasses(User::class);
+$context->addOwnersWithSkippedCollections(User::class);
 ```
 ![Skip owner collections](images/skip_owner_collections.png)
 
 Skip individual items via a callback:
 
 ```php
-$context->addSkippedCollectionItemCallback(
+$context->addCollectionItemSkipCondition(
     function (string $ownerClass, $item) {
         return $item instanceof Post && $item->isDraft();
     }
@@ -175,12 +175,12 @@ $context->addSkippedCollectionItemCallback(
 Limit the number of items in a collection:
 
 ```php
-$context->setCollectionSizeLimit(User::class, 3);
+$context->addCollectionItemLimitPerOwner(User::class, 3);
 ```
 ![Limit first N items](images/limit3.png)
 
 ```php
-$context->setCollectionItemSizeLimit(User::class, Post::class, 2);
+$context->addLimitForOwnerItemCollection(User::class, Post::class, 2);
 ```
 ![Limit specific collection items](images/limit_specific_collection.png)
 

@@ -13,21 +13,21 @@ class FixtureGenerationContextTest extends TestCase
     public function testSkippedCollectionOwnerClassesCanBeAddedAndChecked(): void
     {
         $fixtureGenerationContext = FixtureGenerationContext::create()
-            ->addSkippedCollectionOwnerClasses(['Foo', 'Bar'])
+            ->addOwnersWithSkippedCollections(['Foo', 'Bar'])
         ;
 
-        $this->assertSame(['Foo', 'Bar'], $fixtureGenerationContext->getSkippedCollectionOwnerClasses());
-        $this->assertTrue($fixtureGenerationContext->shouldSkipCollectionsForOwnerClass('Foo'));
-        $this->assertFalse($fixtureGenerationContext->shouldSkipCollectionsForOwnerClass('Baz'));
+        $this->assertSame(['Foo', 'Bar'], $fixtureGenerationContext->getSkipCollectionsOwnedBy());
+        $this->assertTrue($fixtureGenerationContext->shouldSkipCollectionsOwnedBy('Foo'));
+        $this->assertFalse($fixtureGenerationContext->shouldSkipCollectionsOwnedBy('Baz'));
     }
 
-    public function testAddSkippedCollectionItemCallbackAndFiltering(): void
+    public function testaddCollectionItemSkipConditionAndFiltering(): void
     {
         $fixtureGenerationContext = FixtureGenerationContext::create()
-            ->addSkippedCollectionItemCallback(
+            ->addCollectionItemSkipCondition(
                 fn (string $ownerClass, $item): bool => $ownerClass === 'A' && $item === 'skip'
             )
-            ->addSkippedCollectionItemCallback(
+            ->addCollectionItemSkipCondition(
                 fn (string $ownerClass, $item): bool => $ownerClass === 'B' && is_int($item) && $item < 0
             )
         ;
@@ -47,37 +47,37 @@ class FixtureGenerationContextTest extends TestCase
     public function testCollectionSizeLimitMethodsAndValidation(): void
     {
         $fixtureGenerationContext = FixtureGenerationContext::create()
-            ->setCollectionSizeLimit('Foo', 3)
+            ->addCollectionItemLimitPerOwner('Foo', 3)
         ;
 
-        $this->assertTrue($fixtureGenerationContext->shouldLimitCollectionSizeForOwnerClass('Foo'));
-        $this->assertSame(3, $fixtureGenerationContext->getCollectionSizeLimitForOwnerClass('Foo'));
-        $this->assertFalse($fixtureGenerationContext->shouldLimitCollectionSizeForOwnerClass('Bar'));
+        $this->assertTrue($fixtureGenerationContext->hasCollectionItemLimitForOwner('Foo'));
+        $this->assertSame(3, $fixtureGenerationContext->getItemLimitForOwnerCollections('Foo'));
+        $this->assertFalse($fixtureGenerationContext->hasCollectionItemLimitForOwner('Bar'));
 
-        $this->assertSame(['Foo' => 3], $fixtureGenerationContext->getCollectionSizeLimits());
+        $this->assertSame(['Foo' => 3], $fixtureGenerationContext->getCollectionItemLimitPerOwner());
 
         $this->expectException(InvalidArgumentException::class);
-        FixtureGenerationContext::create()->setCollectionSizeLimit('Foo', -1);
+        FixtureGenerationContext::create()->addCollectionItemLimitPerOwner('Foo', -1);
     }
 
     public function testCollectionItemSizeLimitMethodsAndValidation(): void
     {
         $fixtureGenerationContext = FixtureGenerationContext::create()
-            ->setCollectionItemSizeLimit('O', 'I', 2)
-            ->setCollectionItemSizeLimit('O', 'J', 1)
+            ->addLimitForOwnerItemCollection('O', 'I', 2)
+            ->addLimitForOwnerItemCollection('O', 'J', 1)
         ;
 
-        $this->assertTrue($fixtureGenerationContext->shouldLimitCollectionItemSizeFor('O', 'I'));
-        $this->assertSame(2, $fixtureGenerationContext->getCollectionItemSizeLimitFor('O', 'I'));
-        $this->assertTrue($fixtureGenerationContext->shouldLimitCollectionItemSizeFor('O', 'J'));
-        $this->assertSame(1, $fixtureGenerationContext->getCollectionItemSizeLimitFor('O', 'J'));
-        $this->assertFalse($fixtureGenerationContext->shouldLimitCollectionItemSizeFor('O', 'K'));
+        $this->assertTrue($fixtureGenerationContext->shouldLimitCollectionItemSize('O', 'I'));
+        $this->assertSame(2, $fixtureGenerationContext->getCollectionItemSizeLimit('O', 'I'));
+        $this->assertTrue($fixtureGenerationContext->shouldLimitCollectionItemSize('O', 'J'));
+        $this->assertSame(1, $fixtureGenerationContext->getCollectionItemSizeLimit('O', 'J'));
+        $this->assertFalse($fixtureGenerationContext->shouldLimitCollectionItemSize('O', 'K'));
 
         $this->assertSame([
             'O' => ['I' => 2, 'J' => 1],
-        ], $fixtureGenerationContext->getCollectionItemSizeLimits());
+        ], $fixtureGenerationContext->getCollectionItemLimitPerOwnerItem());
 
         $this->expectException(InvalidArgumentException::class);
-        FixtureGenerationContext::create()->setCollectionItemSizeLimit('Foo', 'Bar', -1);
+        FixtureGenerationContext::create()->addLimitForOwnerItemCollection('Foo', 'Bar', -1);
     }
 }

@@ -13,6 +13,8 @@ use Solitus0\AliceGenerator\MetadataHandler\MetadataHandlerInterface;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistryInterface;
 use Solitus0\AliceGenerator\PropertyNamer\PropertyNamerInterface;
 use Solitus0\AliceGenerator\Storage\ObjectCacheCollection;
+use Symfony\Component\PropertyAccess\PropertyAccess;
+use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
 
 class ValueVisitor
 {
@@ -20,9 +22,11 @@ class ValueVisitor
 
     private FixtureGenerationContext $generationContext;
 
-    private ?array $results = null;
+    private array $results = [];
 
     private int $recursionDepth = 0;
+
+    private PropertyAccessorInterface $propertyAccessor;
 
     public function __construct(
         private readonly ClassMetadataProviderInterface $classMetadataProvider,
@@ -32,6 +36,7 @@ class ValueVisitor
         private readonly PropertyNamerInterface $propertyNamer,
         private readonly bool $strictTypeChecking
     ) {
+        $this->propertyAccessor = PropertyAccess::createPropertyAccessor();
     }
 
     /**
@@ -53,7 +58,7 @@ class ValueVisitor
         $this->generationContext->getConstraintsCollection()->setMetadataHandler($this->handler);
     }
 
-    public function getResults(): ?array
+    public function getResults(): array
     {
         return $this->results;
     }
@@ -208,6 +213,12 @@ class ValueVisitor
 
             if ($valueContext->isSkipped()) {
                 continue;
+            }
+
+            if ($this->generationContext->shouldSkipNonWritableProperties()) {
+                if (!$this->propertyAccessor->isWritable($object, $propertyMetadata->name)) {
+                    continue;
+                }
             }
 
             $propName = $this->propertyNamer->createName($valueContext);

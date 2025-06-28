@@ -23,25 +23,37 @@ class FixtureGenerationContext
     private bool $sortResults = true;
 
     /**
-     * @var string[] Classes whose Doctrine Collection properties will be skipped
+     * Whether to skip properties that are not writable using Symfony's PropertyAccessor.
+     * If true, only writable properties will be included in the generated fixture.
      */
-    private array $skippedCollectionOwnerClasses = [];
+    private bool $skipNonWritableProperties = false;
 
     /**
-     * @var callable[] Callbacks to skip individual collection items: function(string $ownerClass, mixed $item): bool
+     * @var callable[] Callbacks to skip specific collection items.
+     * Each callback must have the signature: function(string $ownerClass, mixed $item): bool
      */
-    private array $skippedCollectionItemCallbacks = [];
+    private array $collectionItemSkipConditions = [];
 
     /**
-     * @var int[] Maximum number of collection items to include per owner class
+     * @var string[] List of fully qualified class names.
+     * Doctrine collection properties on these owner classes will be skipped during fixture generation.
      */
-    private array $collectionSizeLimits = [];
+    private array $skipCollectionsOwnedBy = [];
 
     /**
-     * @var int[][] Maximum number of collection items per owner and item class
-     *            [ ownerClass => [ itemClass => limit, ... ], ... ]
+     * @var array<string, int> Limits number of items per collection for a given owner class.
+     * For each collection property owned by the class, this limit applies individually.
+     *
+     * Example: if limit is 2 and the owner has 3 collections, each collection will include up to 2 items.
      */
-    private array $collectionItemSizeLimits = [];
+    private array $collectionItemLimitPerOwner = [];
+
+    /**
+     * @var array<string, array<string, int>> Max number of items allowed per owner and item class.
+     * Limits specific item types in collections owned by a class.
+     * Example: [ OwnerClass => [ ItemClass => limit, ... ], ... ]
+     */
+    private array $collectionItemLimitPerOwnerItem = [];
 
     public function __construct()
     {
@@ -128,67 +140,49 @@ class FixtureGenerationContext
         return $this;
     }
 
-    /**
-     * Add owner class(es) for which Doctrine Collection properties should be skipped.
-     */
-    public function addSkippedCollectionOwnerClasses(string|array $classes): static
+    public function addOwnersWithSkippedCollections(string|array $classes): static
     {
         $classes = is_array($classes) ? $classes : [$classes];
         foreach ($classes as $class) {
             if (!is_string($class)) {
                 throw new InvalidArgumentException(
                     sprintf(
-                        'Non-string passed to addSkippedCollectionOwnerClasses() - "%s" given',
+                        'Non-string passed to addOwnersWithSkippedCollections() - "%s" given',
                         gettype($class)
                     )
                 );
             }
 
-            $this->skippedCollectionOwnerClasses[] = $class;
+            $this->skipCollectionsOwnedBy[] = $class;
         }
 
         return $this;
     }
 
     /**
-     * Returns classes configured to skip Doctrine Collection properties.
-     *
      * @return string[]
      */
-    public function getSkippedCollectionOwnerClasses(): array
+    public function getSkipCollectionsOwnedBy(): array
     {
-        return $this->skippedCollectionOwnerClasses;
+        return $this->skipCollectionsOwnedBy;
     }
 
-    /**
-     * Whether to skip Doctrine Collection properties on the given owner class.
-     */
-    public function shouldSkipCollectionsForOwnerClass(string $ownerClass): bool
+    public function shouldSkipCollectionsOwnedBy(string $ownerClass): bool
     {
-        return in_array($ownerClass, $this->skippedCollectionOwnerClasses, true);
+        return in_array($ownerClass, $this->skipCollectionsOwnedBy, true);
     }
 
-    /**
-     * Register a callback that returns true if a collection item on an owner class should be skipped.
-     *
-     * Signature: function(string $ownerClass, mixed $item): bool
-     *
-     * @return $this
-     */
-    public function addSkippedCollectionItemCallback(callable $callback): static
+    public function addCollectionItemSkipCondition(callable $callback): static
     {
-        $this->skippedCollectionItemCallbacks[] = $callback;
+        $this->collectionItemSkipConditions[] = $callback;
 
         return $this;
     }
 
-    /**
-     * Whether a given collection item on an owner class should be skipped.
-     */
     public function shouldSkipCollectionItem(string $ownerClass, mixed $item): bool
     {
-        foreach ($this->skippedCollectionItemCallbacks as $skippedCollectionItemCallback) {
-            if ($skippedCollectionItemCallback($ownerClass, $item)) {
+        foreach ($this->collectionItemSkipConditions as $itemSkipCondition) {
+            if ($itemSkipCondition($ownerClass, $item)) {
                 return true;
             }
         }
@@ -196,12 +190,7 @@ class FixtureGenerationContext
         return false;
     }
 
-    /**
-     * Set a limit for the number of items included in Doctrine Collection properties on a specific owner class.
-     *
-     * @return $this
-     */
-    public function setCollectionSizeLimit(string $ownerClass, int $limit): static
+    public function addCollectionItemLimitPerOwner(string $ownerClass, int $limit): static
     {
         if ($limit < 0) {
             throw new InvalidArgumentException(
@@ -212,45 +201,27 @@ class FixtureGenerationContext
             );
         }
 
-        $this->collectionSizeLimits[$ownerClass] = $limit;
+        $this->collectionItemLimitPerOwner[$ownerClass] = $limit;
 
         return $this;
     }
 
-    /**
-     * Get all configured collection size limits per owner class.
-     *
-     * @return int[] keyed by owner class name
-     */
-    public function getCollectionSizeLimits(): array
+    public function getCollectionItemLimitPerOwner(): array
     {
-        return $this->collectionSizeLimits;
+        return $this->collectionItemLimitPerOwner;
     }
 
-    /**
-     * Whether a size limit has been configured for this owner class.
-     */
-    public function shouldLimitCollectionSizeForOwnerClass(string $ownerClass): bool
+    public function hasCollectionItemLimitForOwner(string $ownerClass): bool
     {
-        return isset($this->collectionSizeLimits[$ownerClass]);
+        return isset($this->collectionItemLimitPerOwner[$ownerClass]);
     }
 
-    /**
-     * Get the configured size limit for a given owner class, or null if none.
-     *
-     */
-    public function getCollectionSizeLimitForOwnerClass(string $ownerClass): ?int
+    public function getItemLimitForOwnerCollections(string $ownerClass): ?int
     {
-        return $this->collectionSizeLimits[$ownerClass] ?? null;
+        return $this->collectionItemLimitPerOwner[$ownerClass] ?? null;
     }
 
-    /**
-     * Set a limit for the number of a specific item class to include in Doctrine Collection properties
-     * on a given owner class.
-     *
-     * @return $this
-     */
-    public function setCollectionItemSizeLimit(string $ownerClass, string $itemClass, int $limit): static
+    public function addLimitForOwnerItemCollection(string $ownerClass, string $itemClass, int $limit): static
     {
         if ($limit < 0) {
             throw new InvalidArgumentException(
@@ -261,35 +232,35 @@ class FixtureGenerationContext
             );
         }
 
-        $this->collectionItemSizeLimits[$ownerClass][$itemClass] = $limit;
+        $this->collectionItemLimitPerOwnerItem[$ownerClass][$itemClass] = $limit;
 
         return $this;
     }
 
-    /**
-     * Get all configured collection item size limits, nested per owner class.
-     *
-     * @return int[][] [ ownerClass => [ itemClass => limit, ... ], ... ]
-     */
-    public function getCollectionItemSizeLimits(): array
+    public function getCollectionItemLimitPerOwnerItem(): array
     {
-        return $this->collectionItemSizeLimits;
+        return $this->collectionItemLimitPerOwnerItem;
     }
 
-    /**
-     * Whether a size limit has been configured for the given owner & item class.
-     */
-    public function shouldLimitCollectionItemSizeFor(string $ownerClass, string $itemClass): bool
+    public function shouldLimitCollectionItemSize(string $ownerClass, string $itemClass): bool
     {
-        return isset($this->collectionItemSizeLimits[$ownerClass][$itemClass]);
+        return isset($this->collectionItemLimitPerOwnerItem[$ownerClass][$itemClass]);
     }
 
-    /**
-     * Get the configured size limit for the given owner & item class, or null if none.
-     *
-     */
-    public function getCollectionItemSizeLimitFor(string $ownerClass, string $itemClass): ?int
+    public function getCollectionItemSizeLimit(string $ownerClass, string $itemClass): ?int
     {
-        return $this->collectionItemSizeLimits[$ownerClass][$itemClass] ?? null;
+        return $this->collectionItemLimitPerOwnerItem[$ownerClass][$itemClass] ?? null;
+    }
+
+    public function shouldSkipNonWritableProperties(): bool
+    {
+        return $this->skipNonWritableProperties;
+    }
+
+    public function setSkipNonWritableProperties(bool $skipNonWritableProperties): self
+    {
+        $this->skipNonWritableProperties = $skipNonWritableProperties;
+
+        return $this;
     }
 }

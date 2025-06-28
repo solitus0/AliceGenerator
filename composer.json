@@ -21,6 +21,7 @@
     "require": {
         "php": "^8.1",
         "symfony/yaml": ">=5.0",
+        "symfony/property-access": ">=5.0",
         "doctrine/common": "*",
         "jms/metadata": "^2.0",
         "doctrine/orm": ">=2.14"

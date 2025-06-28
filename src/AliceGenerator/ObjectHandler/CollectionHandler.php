@@ -20,7 +20,7 @@ class CollectionHandler implements ObjectHandlerInterface
         }
 
         $visitor = $valueContext->getValueVisitor();
-        if ($visitor instanceof ValueVisitor && $visitor->getGenerationContext()->shouldSkipCollectionsForOwnerClass(
+        if ($visitor instanceof ValueVisitor && $visitor->getGenerationContext()->shouldSkipCollectionsOwnedBy(
             $valueContext->getContextObjectClass()
         )) {
             $valueContext->setSkipped(true);
@@ -32,13 +32,13 @@ class CollectionHandler implements ObjectHandlerInterface
         // Determine configured limits for this owner
         $globalLimit = null;
         if ($visitor instanceof ValueVisitor && $visitor->getGenerationContext(
-        )->shouldLimitCollectionSizeForOwnerClass($ownerClass)) {
-            $globalLimit = $visitor->getGenerationContext()->getCollectionSizeLimitForOwnerClass($ownerClass);
+        )->hasCollectionItemLimitForOwner($ownerClass)) {
+            $globalLimit = $visitor->getGenerationContext()->getItemLimitForOwnerCollections($ownerClass);
         }
 
         $itemLimits = [];
         if ($visitor instanceof ValueVisitor) {
-            $itemLimits = $visitor->getGenerationContext()->getCollectionItemSizeLimits()[$ownerClass] ?? [];
+            $itemLimits = $visitor->getGenerationContext()->getCollectionItemLimitPerOwnerItem()[$ownerClass] ?? [];
         }
 
         // Build array of items, applying per-item and per-item-class limits, and breaking on global limit

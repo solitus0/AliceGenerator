@@ -23,6 +23,12 @@ class FixtureGenerationContext
     private bool $sortResults = true;
 
     /**
+     * Whether to skip properties that are not writable using Symfony's PropertyAccessor.
+     * If true, only writable properties will be included in the generated fixture.
+     */
+    private bool $skipNonWritableProperties = false;
+
+    /**
      * @var string[] Classes whose Doctrine Collection properties will be skipped
      */
     private array $skippedCollectionOwnerClasses = [];
@@ -291,5 +297,17 @@ class FixtureGenerationContext
     public function getCollectionItemSizeLimitFor(string $ownerClass, string $itemClass): ?int
     {
         return $this->collectionItemSizeLimits[$ownerClass][$itemClass] ?? null;
+    }
+
+    public function shouldSkipNonWritableProperties(): bool
+    {
+        return $this->skipNonWritableProperties;
+    }
+
+    public function setSkipNonWritableProperties(bool $skipNonWritableProperties): self
+    {
+        $this->skipNonWritableProperties = $skipNonWritableProperties;
+
+        return $this;
     }
 }

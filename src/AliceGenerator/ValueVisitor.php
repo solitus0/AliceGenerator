@@ -13,6 +13,8 @@ use Solitus0\AliceGenerator\MetadataHandler\MetadataHandlerInterface;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistryInterface;
 use Solitus0\AliceGenerator\PropertyNamer\PropertyNamerInterface;
 use Solitus0\AliceGenerator\Storage\ObjectCacheCollection;
+use Symfony\Component\PropertyAccess\PropertyAccess;
+use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
 
 class ValueVisitor
 {
@@ -24,6 +26,8 @@ class ValueVisitor
 
     private int $recursionDepth = 0;
 
+    private PropertyAccessorInterface $propertyAccessor;
+
     public function __construct(
         private readonly ClassMetadataProviderInterface $classMetadataProvider,
         private readonly MetadataHandlerInterface $handler,
@@ -32,6 +36,7 @@ class ValueVisitor
         private readonly PropertyNamerInterface $propertyNamer,
         private readonly bool $strictTypeChecking
     ) {
+        $this->propertyAccessor = PropertyAccess::createPropertyAccessor();
     }
 
     /**
@@ -208,6 +213,12 @@ class ValueVisitor
 
             if ($valueContext->isSkipped()) {
                 continue;
+            }
+
+            if ($this->generationContext->shouldSkipNonWritableProperties()) {
+                if (!$this->propertyAccessor->isWritable($object, $propertyMetadata->name)) {
+                    continue;
+                }
             }
 
             $propName = $this->propertyNamer->createName($valueContext);

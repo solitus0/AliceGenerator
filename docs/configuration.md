@@ -73,6 +73,17 @@ $generator = FixtureGeneratorBuilder::create()
     ->build();
 ```
 
+## Skipping Non-Writable Properties
+
+By default, all object properties are considered for fixture generation. However, you may want to exclude properties that are not writable via Symfony's `PropertyAccessor` (e.g., private or read-only properties without setters).
+
+To skip such properties during fixture generation, enable the `skipNonWritableProperties` flag in the context:
+
+```php
+$context = FixtureGenerationContext::create()
+    ->setSkipNonWritableProperties(true);
+```
+
 ## Output Format
 
 Fixtures are generated in YAML by default. To output PHP code or a custom format:

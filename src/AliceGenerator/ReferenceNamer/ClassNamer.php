@@ -8,17 +8,23 @@ use Doctrine\Common\Util\ClassUtils;
 
 class ClassNamer implements ReferenceNamerInterface
 {
-    public function createReference(object $object, int $key): string
+    public function __construct(private int $referenceOffset = 0)
     {
-        return $this->createPrefix($object) . $key;
     }
 
-    public function createPrefix($object): string
+    public function createReference(object $object, int $key): string
+    {
+        $adjustedKey = $key + $this->referenceOffset;
+
+        return $this->createPrefix($object) . $adjustedKey;
+    }
+
+    private function createPrefix($object): string
     {
         $class = ClassUtils::getClass($object);
 
         $parts = explode('\\', $class);
-        $className = $parts[count($parts) - 1];
+        $className = end($parts);
 
         return $className . '-';
     }

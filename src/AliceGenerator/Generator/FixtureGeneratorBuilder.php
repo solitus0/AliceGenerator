@@ -14,6 +14,9 @@ use Solitus0\AliceGenerator\ObjectHandler as ObjectHandler;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistry;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistryInterface;
 use Solitus0\AliceGenerator\PropertyNamer\PropertyNamer;
+use Solitus0\AliceGenerator\PropertyNamer\PropertyNamerInterface;
+use Solitus0\AliceGenerator\ReferenceNamer\ClassNamer;
+use Solitus0\AliceGenerator\ReferenceNamer\ReferenceNamerInterface;
 use Solitus0\AliceGenerator\ValueVisitor;
 
 class FixtureGeneratorBuilder
@@ -26,11 +29,11 @@ class FixtureGeneratorBuilder
 
     private readonly MetadataResolver $metadataResolver;
 
-    private readonly PropertyNamer $propertyNamer;
+    private PropertyNamerInterface $propertyNamer;
+
+    private ReferenceNamerInterface $referenceNamer;
 
     private GeneratorInterface $generator;
-
-    private bool $strictTypeChecking = true;
 
     public function __construct()
     {
@@ -49,8 +52,8 @@ class FixtureGeneratorBuilder
         $this->objectHandlerRegistry = $objectHandlerRegistry;
 
         $this->classMetadataProvider = new ClassMetadataProvider(new MetadataFactory(new AttributeDriver()));
-
         $this->metadataResolver = new MetadataResolver();
+        $this->referenceNamer = new ClassNamer();
         $this->propertyNamer = new PropertyNamer();
     }
 
@@ -79,9 +82,27 @@ class FixtureGeneratorBuilder
         return $this;
     }
 
-    public function setStrictTypeChecking(bool $enabled): self
+    public function getPropertyNamer(): PropertyNamerInterface
     {
-        $this->strictTypeChecking = $enabled;
+        return $this->propertyNamer;
+    }
+
+    public function setPropertyNamer(PropertyNamerInterface $propertyNamer): self
+    {
+        $this->propertyNamer = $propertyNamer;
+
+        return $this;
+    }
+
+    public function getReferenceNamer(): ReferenceNamerInterface
+    {
+        return $this->referenceNamer;
+    }
+
+    public function setReferenceNamer(ReferenceNamerInterface $referenceNamer): self
+    {
+        $this->referenceNamer = $referenceNamer;
+
         return $this;
     }
 
@@ -94,7 +115,7 @@ class FixtureGeneratorBuilder
                 $this->metadataResolver,
                 $this->objectHandlerRegistry,
                 $this->propertyNamer,
-                $this->strictTypeChecking
+                $this->referenceNamer,
             ),
             $this->generator
         );

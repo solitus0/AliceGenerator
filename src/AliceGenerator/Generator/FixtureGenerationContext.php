@@ -6,21 +6,13 @@ namespace Solitus0\AliceGenerator\Generator;
 
 use Solitus0\AliceGenerator\Exception\InvalidArgumentException;
 use Solitus0\AliceGenerator\MetadataHandler\NonSpecificMetadataHandler;
-use Solitus0\AliceGenerator\ReferenceNamer\ClassNamer;
-use Solitus0\AliceGenerator\ReferenceNamer\ReferenceNamerInterface;
 use Solitus0\AliceGenerator\Storage\ObjectConstraintsCollection;
 
 class FixtureGenerationContext
 {
-    private int $maximumRecursion = 5;
-
     private readonly ObjectConstraintsCollection $constraintsCollection;
 
-    private ReferenceNamerInterface $referenceNamer;
-
-    private bool $excludeDefaultValues = true;
-
-    private bool $sortResults = true;
+    private int $maximumRecursion = 5;
 
     /**
      * Whether to skip properties that are not writable using Symfony's PropertyAccessor.
@@ -57,7 +49,6 @@ class FixtureGenerationContext
 
     public function __construct()
     {
-        $this->referenceNamer = new ClassNamer();
         $this->constraintsCollection = new ObjectConstraintsCollection();
         $this->constraintsCollection->setMetadataHandler(new NonSpecificMetadataHandler());
     }
@@ -102,42 +93,6 @@ class FixtureGenerationContext
     public function getConstraintsCollection(): ObjectConstraintsCollection
     {
         return $this->constraintsCollection;
-    }
-
-    public function getReferenceNamer(): ReferenceNamerInterface
-    {
-        return $this->referenceNamer;
-    }
-
-    public function setReferenceNamer(ReferenceNamerInterface $referenceNamer): static
-    {
-        $this->referenceNamer = $referenceNamer;
-
-        return $this;
-    }
-
-    public function isExcludeDefaultValuesEnabled(): bool
-    {
-        return $this->excludeDefaultValues;
-    }
-
-    public function setExcludeDefaultValues(bool $excludeDefaultValues): static
-    {
-        $this->excludeDefaultValues = $excludeDefaultValues;
-
-        return $this;
-    }
-
-    public function isSortResultsEnabled(): bool
-    {
-        return $this->sortResults;
-    }
-
-    public function setSortResults(bool $sortResults): static
-    {
-        $this->sortResults = $sortResults;
-
-        return $this;
     }
 
     public function addOwnersWithSkippedCollections(string|array $classes): static

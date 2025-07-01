@@ -4,14 +4,6 @@ AliceGenerator provides a comprehensive set of configuration options to tailor f
 
 ## Generator Setup
 
-By default, you can create a `FixtureGenerator` in one line:
-
-```php
-use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
-
-$generator = FixtureGeneratorBuilder::create()->build();
-```
-
 ### Doctrine Integration
 
 To integrate with Doctrine and leverage entity metadata and proxies:
@@ -43,7 +35,7 @@ use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
 use App\Alice\Naming\CustomPropertyNamer;
 
 $generator = FixtureGeneratorBuilder::create()
-    ->setPropertyNamer(new CustomPropertyNamer())
+    ->setPropertyNamer(new PropertyNamer())
     ->build();
 ```
 
@@ -54,7 +46,7 @@ Reference keys used in generated fixtures (e.g., `@User-1`) are created by a **R
 You can configure a custom reference namer in the fixture generation context:
 
 ```php
-$context = FixtureGenerationContext::create()
+$context = FixtureGeneratorBuilder::create()
     ->setReferenceNamer(new ClassNamer());
 ```
 
@@ -63,17 +55,9 @@ Available Reference Namers
 
 Reference namers allow you to customize how references are structured in the fixture files. This is useful when you want predictable keys or need to avoid naming conflicts across files.
 
-## Strict Type Checking
+## Fixture generation context
 
-By default, properties with default values are skipped using strict comparison (`===`). To disable strict type checking and use non-strict comparison (`==`) for non-null, non-boolean, non-object values:
-
-```php
-$generator = FixtureGeneratorBuilder::create()
-    ->setStrictTypeChecking(false)
-    ->build();
-```
-
-## Skipping Non-Writable Properties
+### Skipping Non-Writable Properties
 
 By default, all object properties are considered for fixture generation. However, you may want to exclude properties that are not writable via Symfony's `PropertyAccessor` (e.g., private or read-only properties without setters).
 
@@ -84,7 +68,7 @@ $context = FixtureGenerationContext::create()
     ->setSkipNonWritableProperties(true);
 ```
 
-## Output Format
+### Output Format
 
 Fixtures are generated in YAML by default. To output PHP code or a custom format:
 
@@ -97,16 +81,6 @@ $generator = FixtureGeneratorBuilder::create()
     ->build();
 
 $code = $generator->generate($objects, FixtureGenerationContext::create());
-```
-
-## Generation Context
-
-Use `FixtureGenerationContext` to control how `generate()` processes each request:
-
-```php
-use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
-
-$context = FixtureGenerationContext::create();
 ```
 
 ### Recursion Control
@@ -183,20 +157,6 @@ $context->addCollectionItemLimitPerOwner(User::class, 3);
 $context->addLimitForOwnerItemCollection(User::class, Post::class, 2);
 ```
 ![Limit specific collection items](images/limit_specific_collection.png)
-
-### Default Values and Sorting
-
-Include properties with default values:
-
-```php
-$context->setExcludeDefaultValues(false);
-```
-
-Sort fixtures for deterministic output:
-
-```php
-$context->setSortResults(true);
-```
 
 ## Custom Object Handlers
 

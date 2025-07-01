@@ -21,11 +21,9 @@ class FixtureGenerator
 
         $results = $this->valueVisitor->getResults();
 
-        if ($generationContext->isSortResultsEnabled()) {
-            ksort($results, SORT_NATURAL);
-            foreach ($results as &$result) {
-                ksort($result, SORT_NATURAL);
-            }
+        ksort($results, SORT_NATURAL);
+        foreach ($results as &$result) {
+            ksort($result, SORT_NATURAL);
         }
 
         return $this->generator->generate($results);

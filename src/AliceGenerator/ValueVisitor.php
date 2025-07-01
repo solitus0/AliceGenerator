@@ -12,15 +12,20 @@ use Solitus0\AliceGenerator\Metadata\Resolver\MetadataResolverInterface;
 use Solitus0\AliceGenerator\MetadataHandler\MetadataHandlerInterface;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistryInterface;
 use Solitus0\AliceGenerator\PropertyNamer\PropertyNamerInterface;
+use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRulesCollection;
+use Solitus0\AliceGenerator\PropertyTransformer\ValueTransformerInterface;
+use Solitus0\AliceGenerator\ReferenceNamer\ReferenceNamerInterface;
 use Solitus0\AliceGenerator\Storage\ObjectCacheCollection;
 use Symfony\Component\PropertyAccess\PropertyAccess;
 use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
 
 class ValueVisitor
 {
-    private ?ObjectCacheCollection $objectCacheByClass = null;
+    private ObjectCacheCollection $objectCacheByClass;
 
     private FixtureGenerationContext $generationContext;
+
+    private PropertyTransformRulesCollection $transformRulesCollection;
 
     private array $results = [];
 
@@ -34,14 +39,11 @@ class ValueVisitor
         private readonly MetadataResolverInterface $metadataResolver,
         private readonly ObjectHandlerRegistryInterface $objectHandlerRegistry,
         private readonly PropertyNamerInterface $propertyNamer,
-        private readonly bool $strictTypeChecking
+        private readonly ReferenceNamerInterface $referenceNamer,
     ) {
         $this->propertyAccessor = PropertyAccess::createPropertyAccessor();
     }
 
-    /**
-     * @internal
-     */
     public function getGenerationContext(): FixtureGenerationContext
     {
         return $this->generationContext;
@@ -53,9 +55,9 @@ class ValueVisitor
 
         // Reset caches
         $this->results = [];
-        $this->objectCacheByClass = new ObjectCacheCollection();
-        $this->objectCacheByClass->setMetadataHandler($this->handler);
+        $this->objectCacheByClass = new ObjectCacheCollection($this->handler);
         $this->generationContext->getConstraintsCollection()->setMetadataHandler($this->handler);
+        $this->transformRulesCollection = $this->generationContext->getTransformRulesCollection();
     }
 
     public function getResults(): array
@@ -73,6 +75,14 @@ class ValueVisitor
 
     public function visitUnknownType(ValueContext $valueContext): void
     {
+        $propertyMetadata = $valueContext->getMetadata();
+        if ($propertyMetadata) {
+            $valueTransformer = $this->transformRulesCollection->getPropertyTransformer($propertyMetadata);
+            if ($valueTransformer instanceof ValueTransformerInterface) {
+                $valueTransformer->transform($valueContext);
+            }
+        }
+        
         if (is_array($valueContext->getValue())) {
             $this->visitArray($valueContext);
         } elseif (is_object($valueContext->getValue())) {
@@ -115,13 +125,11 @@ class ValueVisitor
             }
 
             $result = $this->objectCacheByClass->find($object);
-            $referenceNamer = $this->generationContext->getReferenceNamer();
-
             switch ($result) {
                 case ObjectCacheCollection::OBJECT_NOT_FOUND:
                     if ($this->recursionDepth <= $this->generationContext->getMaximumRecursion()) {
                         $key = $this->objectCacheByClass->add($object);
-                        $reference = $referenceNamer->createReference($object, $key);
+                        $reference = $this->referenceNamer->createReference($object, $key);
 
                         $objectAdded = $this->handlePersistedObject($object, $reference);
 
@@ -142,7 +150,7 @@ class ValueVisitor
 
                     return;
                 default:
-                    $valueContext->setValue('@' . $referenceNamer->createReference($object, $result));
+                    $valueContext->setValue('@' . $this->referenceNamer->createReference($object, $result));
 
                     return;
             }
@@ -162,20 +170,17 @@ class ValueVisitor
         }
     }
 
-    /**
-     * @throws \Exception
-     */
     private function handlePersistedObject(object $object, string $reference): bool
     {
         $class = $this->handler->getClass($object);
         $this->handler->preHandle($object);
-        // Create a new instance of this class to check values against
-        $reflectionClass = new \ReflectionClass($class);
-        $newObject = $reflectionClass->newInstanceWithoutConstructor();
 
-        $propertyMetadatas = $this->classMetadataProvider->getPropertyMetadata($reflectionClass);
         $saveValues = [];
         $this->recursionDepth++;
+
+        $reflectionClass = new \ReflectionClass($class);
+        $newObject = $reflectionClass->newInstanceWithoutConstructor();
+        $propertyMetadatas = $this->classMetadataProvider->getPropertyMetadata($reflectionClass);
 
         foreach ($propertyMetadatas as $propertyMetadata) {
             $reflectionProperty = new \ReflectionProperty($propertyMetadata->class, $propertyMetadata->name);
@@ -196,16 +201,8 @@ class ValueVisitor
 
             if (!$valueContext->isModified() && !$valueContext->isSkipped()) {
                 $value = $valueContext->getValue();
-
-                if ($this->generationContext->isExcludeDefaultValuesEnabled()) {
-                    // Avoid setting unnecessary data
-                    if ($this->strictTypeChecking || $value === null || is_bool($value) || is_object($value)) {
-                        if ($value === $initialValue) {
-                            continue;
-                        }
-                    } elseif ($value == $initialValue) {
-                        continue;
-                    }
+                if ($value === $initialValue) {
+                    continue;
                 }
 
                 $this->visitUnknownType($valueContext);
@@ -226,8 +223,6 @@ class ValueVisitor
                 throw new InvalidPropertyNameException('Property name must be a non empty string.');
             }
 
-            // TODO sanitize logic
-
             $saveValues[$propName] = $valueContext->getValue();
         }
 
@@ -238,6 +233,7 @@ class ValueVisitor
         }
 
         $this->results[$class][$reference] = $saveValues;
+
         return true;
     }
 }

@@ -11,7 +11,14 @@ redesigned and maintained independently by [solitus0](https://github.com/solitus
 
 ## Documentation
 
-For a full guide, see the [documentation](docs/index.md).
+Detailed guides are available:
+
+- [Getting Started](./docs/getting-started.md)
+- [Usage](./docs/usage.md)
+- [Configuration](./docs/configuration.md)
+- [Custom Object Handlers](./docs/custom-object-handlers.md)
+- [Property Transformers](./docs/property-transformers.md)
+- [Changelog](./CHANGELOG.md)
 
 ## Features
 
@@ -19,6 +26,7 @@ For a full guide, see the [documentation](docs/index.md).
 - Customizable property namers and reference namers
 - Pluggable object handlers for custom types
 - Fine-grained control over recursion and collection handling
+- Data sanitation via property transformers
 
 ## License
 

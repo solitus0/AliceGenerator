@@ -6,21 +6,17 @@ namespace Solitus0\AliceGenerator\Generator;
 
 use Solitus0\AliceGenerator\Exception\InvalidArgumentException;
 use Solitus0\AliceGenerator\MetadataHandler\NonSpecificMetadataHandler;
-use Solitus0\AliceGenerator\ReferenceNamer\ClassNamer;
-use Solitus0\AliceGenerator\ReferenceNamer\ReferenceNamerInterface;
+use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRule;
+use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRulesCollection;
 use Solitus0\AliceGenerator\Storage\ObjectConstraintsCollection;
 
 class FixtureGenerationContext
 {
-    private int $maximumRecursion = 5;
-
     private readonly ObjectConstraintsCollection $constraintsCollection;
 
-    private ReferenceNamerInterface $referenceNamer;
+    private readonly PropertyTransformRulesCollection $transformRulesCollection;
 
-    private bool $excludeDefaultValues = true;
-
-    private bool $sortResults = true;
+    private int $maximumRecursion = 5;
 
     /**
      * Whether to skip properties that are not writable using Symfony's PropertyAccessor.
@@ -57,9 +53,8 @@ class FixtureGenerationContext
 
     public function __construct()
     {
-        $this->referenceNamer = new ClassNamer();
-        $this->constraintsCollection = new ObjectConstraintsCollection();
-        $this->constraintsCollection->setMetadataHandler(new NonSpecificMetadataHandler());
+        $this->constraintsCollection = new ObjectConstraintsCollection(new NonSpecificMetadataHandler());
+        $this->transformRulesCollection = new PropertyTransformRulesCollection();
     }
 
     public static function create(): self
@@ -93,7 +88,7 @@ class FixtureGenerationContext
                 );
             }
 
-            $this->getConstraintsCollection()->addConstraint($object);
+            $this->constraintsCollection->addConstraint($object);
         }
 
         return $this;
@@ -102,42 +97,6 @@ class FixtureGenerationContext
     public function getConstraintsCollection(): ObjectConstraintsCollection
     {
         return $this->constraintsCollection;
-    }
-
-    public function getReferenceNamer(): ReferenceNamerInterface
-    {
-        return $this->referenceNamer;
-    }
-
-    public function setReferenceNamer(ReferenceNamerInterface $referenceNamer): static
-    {
-        $this->referenceNamer = $referenceNamer;
-
-        return $this;
-    }
-
-    public function isExcludeDefaultValuesEnabled(): bool
-    {
-        return $this->excludeDefaultValues;
-    }
-
-    public function setExcludeDefaultValues(bool $excludeDefaultValues): static
-    {
-        $this->excludeDefaultValues = $excludeDefaultValues;
-
-        return $this;
-    }
-
-    public function isSortResultsEnabled(): bool
-    {
-        return $this->sortResults;
-    }
-
-    public function setSortResults(bool $sortResults): static
-    {
-        $this->sortResults = $sortResults;
-
-        return $this;
     }
 
     public function addOwnersWithSkippedCollections(string|array $classes): static
@@ -260,6 +219,18 @@ class FixtureGenerationContext
     public function setSkipNonWritableProperties(bool $skipNonWritableProperties): self
     {
         $this->skipNonWritableProperties = $skipNonWritableProperties;
+
+        return $this;
+    }
+
+    public function getTransformRulesCollection(): PropertyTransformRulesCollection
+    {
+        return $this->transformRulesCollection;
+    }
+
+    public function addPropertyTransformRule(PropertyTransformRule $object): static
+    {
+        $this->transformRulesCollection->add($object);
 
         return $this;
     }

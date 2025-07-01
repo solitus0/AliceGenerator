@@ -51,8 +51,7 @@ class ValueVisitor
 
         // Reset caches
         $this->results = [];
-        $this->objectCacheByClass = new ObjectCacheCollection();
-        $this->objectCacheByClass->setMetadataHandler($this->handler);
+        $this->objectCacheByClass = new ObjectCacheCollection($this->handler);
         $this->generationContext->getConstraintsCollection()->setMetadataHandler($this->handler);
     }
 

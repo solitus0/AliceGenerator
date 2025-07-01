@@ -49,8 +49,7 @@ class FixtureGenerationContext
 
     public function __construct()
     {
-        $this->constraintsCollection = new ObjectConstraintsCollection();
-        $this->constraintsCollection->setMetadataHandler(new NonSpecificMetadataHandler());
+        $this->constraintsCollection = new ObjectConstraintsCollection(new NonSpecificMetadataHandler());
     }
 
     public static function create(): self

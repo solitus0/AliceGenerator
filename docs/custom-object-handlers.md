@@ -7,10 +7,11 @@ into fixture-ready values. You can implement custom handlers to support any doma
 
 By default, AliceGenerator registers handlers for:
 
-- `DateTimeHandler` for `\DateTimeInterface`
+- `CollectionHandler` for Doctrine collections
+- `DateTimeHandler` for `\DateTime`
+- `DateTimeImmutableHandler` for `\DateTimeImmutable`
 - `EnumHandler` for PHP enums
 - `RamseyUuidHandler` for UUIDs
-- `CollectionHandler` for Doctrine collections
 
 ## Implementing a Custom Handler
 

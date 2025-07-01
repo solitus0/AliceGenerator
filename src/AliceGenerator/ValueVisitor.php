@@ -12,6 +12,8 @@ use Solitus0\AliceGenerator\Metadata\Resolver\MetadataResolverInterface;
 use Solitus0\AliceGenerator\MetadataHandler\MetadataHandlerInterface;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistryInterface;
 use Solitus0\AliceGenerator\PropertyNamer\PropertyNamerInterface;
+use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRulesCollection;
+use Solitus0\AliceGenerator\PropertyTransformer\ValueTransformerInterface;
 use Solitus0\AliceGenerator\ReferenceNamer\ReferenceNamerInterface;
 use Solitus0\AliceGenerator\Storage\ObjectCacheCollection;
 use Symfony\Component\PropertyAccess\PropertyAccess;
@@ -22,6 +24,8 @@ class ValueVisitor
     private ObjectCacheCollection $objectCacheByClass;
 
     private FixtureGenerationContext $generationContext;
+
+    private PropertyTransformRulesCollection $transformRulesCollection;
 
     private array $results = [];
 
@@ -53,6 +57,7 @@ class ValueVisitor
         $this->results = [];
         $this->objectCacheByClass = new ObjectCacheCollection($this->handler);
         $this->generationContext->getConstraintsCollection()->setMetadataHandler($this->handler);
+        $this->transformRulesCollection = $this->generationContext->getTransformRulesCollection();
     }
 
     public function getResults(): array
@@ -70,6 +75,14 @@ class ValueVisitor
 
     public function visitUnknownType(ValueContext $valueContext): void
     {
+        $propertyMetadata = $valueContext->getMetadata();
+        if ($propertyMetadata) {
+            $valueTransformer = $this->transformRulesCollection->getPropertyTransformer($propertyMetadata);
+            if ($valueTransformer instanceof ValueTransformerInterface) {
+                $valueTransformer->transform($valueContext);
+            }
+        }
+        
         if (is_array($valueContext->getValue())) {
             $this->visitArray($valueContext);
         } elseif (is_object($valueContext->getValue())) {
@@ -210,8 +223,6 @@ class ValueVisitor
                 throw new InvalidPropertyNameException('Property name must be a non empty string.');
             }
 
-            // TODO sanitize logic
-
             $saveValues[$propName] = $valueContext->getValue();
         }
 
@@ -222,6 +233,7 @@ class ValueVisitor
         }
 
         $this->results[$class][$reference] = $saveValues;
+
         return true;
     }
 }

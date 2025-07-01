@@ -18,6 +18,7 @@ Detailed guides are available:
 - [Usage](usage.md)
 - [Configuration](configuration.md)
 - [Custom Object Handlers](custom-object-handlers.md)
+- [Property Transformers](property-transformers.md)
 - [Changelog](../CHANGELOG.md)
 
 ## Support & Contributing

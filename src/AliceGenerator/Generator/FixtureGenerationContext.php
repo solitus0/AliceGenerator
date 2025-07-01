@@ -6,11 +6,15 @@ namespace Solitus0\AliceGenerator\Generator;
 
 use Solitus0\AliceGenerator\Exception\InvalidArgumentException;
 use Solitus0\AliceGenerator\MetadataHandler\NonSpecificMetadataHandler;
+use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRule;
+use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRulesCollection;
 use Solitus0\AliceGenerator\Storage\ObjectConstraintsCollection;
 
 class FixtureGenerationContext
 {
     private readonly ObjectConstraintsCollection $constraintsCollection;
+
+    private readonly PropertyTransformRulesCollection $transformRulesCollection;
 
     private int $maximumRecursion = 5;
 
@@ -50,6 +54,7 @@ class FixtureGenerationContext
     public function __construct()
     {
         $this->constraintsCollection = new ObjectConstraintsCollection(new NonSpecificMetadataHandler());
+        $this->transformRulesCollection = new PropertyTransformRulesCollection();
     }
 
     public static function create(): self
@@ -83,7 +88,7 @@ class FixtureGenerationContext
                 );
             }
 
-            $this->getConstraintsCollection()->addConstraint($object);
+            $this->constraintsCollection->addConstraint($object);
         }
 
         return $this;
@@ -214,6 +219,18 @@ class FixtureGenerationContext
     public function setSkipNonWritableProperties(bool $skipNonWritableProperties): self
     {
         $this->skipNonWritableProperties = $skipNonWritableProperties;
+
+        return $this;
+    }
+
+    public function getTransformRulesCollection(): PropertyTransformRulesCollection
+    {
+        return $this->transformRulesCollection;
+    }
+
+    public function addPropertyTransformRule(PropertyTransformRule $object): static
+    {
+        $this->transformRulesCollection->add($object);
 
         return $this;
     }

@@ -58,12 +58,9 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
             $ignore = true;
         }
 
-        $mapped = true;
-        try {
-            $classMetadata->getReflectionProperty($propName);
-        } catch (\Exception) {
-            $mapped = false;
-        }
+        $mapped = $classMetadata->hasField($propName)
+            || $classMetadata->hasAssociation($propName)
+            || (!empty($classMetadata->embeddedClasses) && array_key_exists($propName, $classMetadata->embeddedClasses));
 
         return $ignore || !$mapped;
     }

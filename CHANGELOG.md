@@ -22,6 +22,9 @@
     - Wraps the encoded value in an Alice expression using  
       `htmlspecialchars_decode($encoded, ENT_QUOTES)` at runtime.
 
+- **Doctrine metadata property check in `DoctrineMetadataHandler::shouldSkipProperty()`**  
+  Replaced `getReflectionProperty()` with `hasField()`, `hasAssociation()`, and `embeddedClasses` lookups to avoid PHP warnings (`Undefined array key ...`) when checking unmapped properties.
+
 ---
 
 ## [v0.1.3] – 2025-07-01

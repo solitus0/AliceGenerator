@@ -28,6 +28,19 @@ class ValueContext
 
     public function getValue(): mixed
     {
+        if (!$this->modified && is_string($this->value)) {
+            $s = $this->value;
+
+            // if string is raw html or xml prevent alice to interpret as evaluated expression
+            if ($s !== strip_tags($s)) {
+                // Step 1: escape HTML special chars (<, >, ", ')
+                $s = htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+                // Step 2: revert inside Alice expression at runtime
+                return "<htmlspecialchars_decode('$s', 3)>";
+            }
+        }
+
         return $this->value;
     }
 

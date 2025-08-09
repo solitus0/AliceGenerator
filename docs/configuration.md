@@ -59,13 +59,13 @@ Reference namers allow you to customize how references are structured in the fix
 
 ### Skipping Non-Writable Properties
 
-By default, all object properties are considered for fixture generation. However, you may want to exclude properties that are not writable via Symfony's `PropertyAccessor` (e.g., private or read-only properties without setters).
+By default, properties that are not writable via Symfony’s PropertyAccessor (e.g., private or read-only properties without setters) are skipped during fixture generation.
 
-To skip such properties during fixture generation, enable the `skipNonWritableProperties` flag in the context:
+If you want to include such properties, you can disable this behavior by setting the skipNonWritableProperties flag to false in the context:
 
 ```php
 $context = FixtureGenerationContext::create()
-    ->setSkipNonWritableProperties(true);
+    ->setSkipNonWritableProperties(false);
 ```
 
 ### Output Format

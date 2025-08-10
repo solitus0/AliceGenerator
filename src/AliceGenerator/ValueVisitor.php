@@ -82,7 +82,7 @@ class ValueVisitor
                 $valueTransformer->transform($valueContext);
             }
         }
-        
+
         if (is_array($valueContext->getValue())) {
             $this->visitArray($valueContext);
         } elseif (is_object($valueContext->getValue())) {
@@ -187,10 +187,6 @@ class ValueVisitor
             $reflectionProperty->setAccessible(true);
 
             $value = $reflectionProperty->isInitialized($object) ? $reflectionProperty->getValue($object) : null;
-            $initialValue = $reflectionProperty->isInitialized($newObject) ? $reflectionProperty->getValue(
-                $newObject
-            ) : null;
-
             $valueContext = new ValueContext($value, $class, $object, $propertyMetadata, $this);
 
             if ($this->handler->shouldSkipProperty($valueContext)) {
@@ -200,6 +196,9 @@ class ValueVisitor
             $this->metadataResolver->resolve($valueContext);
 
             if (!$valueContext->isModified() && !$valueContext->isSkipped()) {
+                $initialValue = $reflectionProperty->isInitialized($newObject) ?
+                    $reflectionProperty->getValue($newObject) : null;
+
                 $value = $valueContext->getValue();
                 if ($value === $initialValue) {
                     continue;

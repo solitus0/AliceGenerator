@@ -11,8 +11,10 @@ use Solitus0\AliceGenerator\ValueContext;
 
 class DoctrineMetadataHandler extends AbstractMetadataHandler
 {
-    public function __construct(private readonly EntityManagerInterface $entityManager)
-    {
+    public function __construct(
+        private readonly EntityManagerInterface $entityManager,
+        private readonly bool $skipEmptyStrings = true,
+    ) {
     }
 
     public function canHandle(object $object): bool
@@ -36,6 +38,7 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
             try {
                 $object->__load();
             } catch (\Throwable) {
+                // ignore proxy load failures
             }
         }
     }
@@ -49,6 +52,7 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
 
         $propName = $valueContext->getPropName();
 
+        // 1) Skip auto-generated single-field identifiers
         $ignore = false;
         if (
             $classMetadata->isIdentifier($propName)
@@ -58,9 +62,28 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
             $ignore = true;
         }
 
-        $mapped = $classMetadata->hasField($propName)
-            || $classMetadata->hasAssociation($propName)
-            || (!empty($classMetadata->embeddedClasses) && array_key_exists($propName, $classMetadata->embeddedClasses));
+        // 2) Is this property mapped by Doctrine?
+        $isMappedField = $classMetadata->hasField($propName);
+        $isMappedAssoc = $classMetadata->hasAssociation($propName);
+        $isEmbedded = !empty($classMetadata->embeddedClasses)
+            && array_key_exists($propName, $classMetadata->embeddedClasses);
+
+        $mapped = $isMappedField || $isMappedAssoc || $isEmbedded;
+
+        // 3) Optional rule: skip empty strings for nullable scalar Doctrine fields
+        if (
+            $this->skipEmptyStrings
+            && $isMappedField
+            && is_string($valueContext->getValue())
+            && trim($valueContext->getValue()) === ''
+        ) {
+            // Determine nullability from field mapping
+            $fieldMapping = $classMetadata->getFieldMapping($propName);
+            $nullable = $fieldMapping['nullable'] ?? false;
+            if ($nullable) {
+                return true;
+            }
+        }
 
         return $ignore || !$mapped;
     }

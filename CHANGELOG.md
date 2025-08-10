@@ -13,6 +13,9 @@
 
 ### Changed
 - **`setSkipNonWritableProperties`** default value changed from `false` to `true` to skip non-writable properties by default.
+- **`DoctrineMetadataHandler::shouldSkipProperty()`**
+    - Added constructor option `$skipEmptyStrings` (default: `true`) to skip nullable Doctrine scalar fields when their value is an empty string.
+    - This prevents generating fixtures with meaningless empty string values for fields that can be `NULL`.
 
 ### Fixed
 - **HTML/XML literal handling in `getValue()`**  

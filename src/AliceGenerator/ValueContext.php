@@ -33,6 +33,8 @@ class ValueContext
 
             // if string is raw html or xml prevent alice to interpret as evaluated expression
             if ($s !== strip_tags($s)) {
+                //replace new lines before encoding Alice’s function argument parser treats newlines as separators
+                $s = str_replace("\n", '', $s);
                 // Step 1: escape HTML special chars (<, >, ", ')
                 $s = htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 

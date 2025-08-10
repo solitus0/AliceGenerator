@@ -11,6 +11,10 @@
   Flexible reference namer that generates fixture references via a user-provided  
   `\Closure (object $object, int $key): string`.
 
+- **`DoctrineMetadataHandler`**  
+  Added constructor option `$skipIdFields` (default: `true`) to allow automatic exclusion of identifier fields,  
+  including UUID/ULID types, when generating fixtures.
+
 ### Changed
 - **`setSkipNonWritableProperties`** default value changed from `false` to `true` to skip non-writable properties by default.
 - **`DoctrineMetadataHandler::shouldSkipProperty()`**
@@ -26,9 +30,11 @@
       `htmlspecialchars_decode($encoded, ENT_QUOTES)` at runtime.
 
 - **Doctrine metadata property check in `DoctrineMetadataHandler::shouldSkipProperty()`**  
-  Replaced `getReflectionProperty()` with `hasField()`, `hasAssociation()`, and `embeddedClasses` lookups to avoid PHP warnings (`Undefined array key ...`) when checking unmapped properties.
+  Replaced `getReflectionProperty()` with `hasField()`, `hasAssociation()`, and `embeddedClasses` lookups  
+  to avoid PHP warnings (`Undefined array key ...`) when checking unmapped properties.
 
----
+- **Identifier detection in `DoctrineMetadataHandler::shouldSkipProperty()`**  
+  Improved logic for identifying generated or UUID/ULID identifier fields to ensure accurate skipping.
 
 ## [v0.1.3] – 2025-07-01
 

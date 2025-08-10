@@ -13,6 +13,7 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
+        private readonly bool $skipIdentifiers = true,
         private readonly bool $skipEmptyStrings = true,
     ) {
     }
@@ -52,14 +53,36 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
 
         $propName = $valueContext->getPropName();
 
-        // 1) Skip auto-generated single-field identifiers
+        // 1) Optionally skip single-field identifiers
         $ignore = false;
+
         if (
-            $classMetadata->isIdentifier($propName)
-            && $classMetadata->generatorType !== ORMClassMetadata::GENERATOR_TYPE_NONE
+            $this->skipIdentifiers
+            && $classMetadata->isIdentifier($propName)
             && !$classMetadata->isIdentifierComposite
         ) {
-            $ignore = true;
+            // a) Generated IDs
+            $hasGenerator = $classMetadata->generatorType !== ORMClassMetadata::GENERATOR_TYPE_NONE;
+
+            // b) UUID/ULID-like scalar types (sometimes filled outside Doctrine's generator)
+            $fieldType = $classMetadata->hasField($propName)
+                ? (string)$classMetadata->getTypeOfField($propName)
+                : null;
+
+            $uuidLikeTypes = [
+                'guid',
+                'uuid',
+                'uuid_binary',
+                'uuid_binary_ordered_time',
+                'ulid',
+                'ulid_binary',
+            ];
+
+            $isUuidLike = $fieldType !== null && in_array($fieldType, $uuidLikeTypes, true);
+
+            if ($hasGenerator || $isUuidLike) {
+                $ignore = true;
+            }
         }
 
         // 2) Is this property mapped by Doctrine?
@@ -70,16 +93,16 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
 
         $mapped = $isMappedField || $isMappedAssoc || $isEmbedded;
 
-        // 3) Optional rule: skip empty strings for nullable scalar Doctrine fields
+        // 3) Optionally skip empty strings for nullable scalar fields
         if (
             $this->skipEmptyStrings
             && $isMappedField
             && is_string($valueContext->getValue())
             && trim($valueContext->getValue()) === ''
         ) {
-            // Determine nullability from field mapping
             $fieldMapping = $classMetadata->getFieldMapping($propName);
             $nullable = $fieldMapping['nullable'] ?? false;
+
             if ($nullable) {
                 return true;
             }

@@ -20,7 +20,7 @@ $generator = FixtureGeneratorBuilder::create()
 The `DoctrineMetadataHandler` automatically:
 - Excludes identifiers and unmapped properties from fixtures
 - Handles Doctrine proxy objects
-- Persists only managed entities
+- Dumps only managed entities
 
 ## Naming Strategies
 
@@ -45,27 +45,71 @@ Reference keys used in generated fixtures (e.g., `@User-1`) are created by a **R
 
 You can configure a custom reference namer in the fixture generation context:
 
+---
+
+#### Available Reference Namers
+
+- **`ClassNamer`** *(default)*  
+  Generates references based on the object's class name and a numeric index, with optional offset.
+
+**Constructor:**
 ```php
-$context = FixtureGeneratorBuilder::create()
-    ->setReferenceNamer(new ClassNamer());
+public function __construct(int $referenceOffset = 0)
 ```
 
-Available Reference Namers
-•	ClassNamer (default): Generates references based on the object’s class name and a numeric index, e.g., @User-1, @Product-42.
+**Example:**
+```php
+use Solitus0\AliceGenerator\ReferenceNamer\ClassNamer;
 
-Reference namers allow you to customize how references are structured in the fixture files. This is useful when you want predictable keys or need to avoid naming conflicts across files.
+// Creates references like @User-101, @Product-101
+$namer = new ClassNamer(referenceOffset: 100);
 
+$context = FixtureGeneratorBuilder::create()
+  ->setReferenceNamer($namer);
+```
+---
+
+- **`CallbackNamer`**  
+  Fully customizable reference generation via a user-provided closure, with optional offset.
+
+**Constructor:**
+```php
+public function __construct(\Closure $callback, int $referenceOffset = 0)
+```
+
+**Example:**
+```php
+use Solitus0\AliceGenerator\ReferenceNamer\CallbackNamer;
+
+// Creates references like @User-example@example.com
+$namer = new CallbackNamer(
+  callback: static function (object $obj, int $index): string {
+      $short = (new \ReflectionClass($obj))->getShortName();
+      if ($obj instanceof EmailAwareInterface) {
+          return sprintf('%s-%s', $short, $obj->getEmail());
+      }
+
+      // Fallback: Short class name + index, e.g. "@User-1"
+      return sprintf('%s-%d', $short, $index);
+  }
+);
+
+$context = FixtureGeneratorBuilder::create()
+  ->setReferenceNamer($namer);
+```
+
+---
 ## Fixture generation context
 
 ### Skipping Non-Writable Properties
 
-By default, all object properties are considered for fixture generation. However, you may want to exclude properties that are not writable via Symfony's `PropertyAccessor` (e.g., private or read-only properties without setters).
+By default, properties that are not writable via Symfony’s PropertyAccessor (e.g., private or read-only properties without setters) are skipped during fixture generation.
 
-To skip such properties during fixture generation, enable the `skipNonWritableProperties` flag in the context:
+If you want to include such properties, you can disable this behavior by setting the skipNonWritableProperties flag to false in the context:
 
 ```php
 $context = FixtureGenerationContext::create()
-    ->setSkipNonWritableProperties(true);
+    ->setSkipNonWritableProperties(false);
 ```
 
 ### Output Format

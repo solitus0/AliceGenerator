@@ -11,8 +11,11 @@ use Solitus0\AliceGenerator\ValueContext;
 
 class DoctrineMetadataHandler extends AbstractMetadataHandler
 {
-    public function __construct(private readonly EntityManagerInterface $entityManager)
-    {
+    public function __construct(
+        private readonly EntityManagerInterface $entityManager,
+        private readonly bool $skipIdentifiers = true,
+        private readonly bool $skipEmptyStrings = true,
+    ) {
     }
 
     public function canHandle(object $object): bool
@@ -36,6 +39,7 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
             try {
                 $object->__load();
             } catch (\Throwable) {
+                // ignore proxy load failures
             }
         }
     }
@@ -49,20 +53,59 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
 
         $propName = $valueContext->getPropName();
 
+        // 1) Optionally skip single-field identifiers
         $ignore = false;
+
         if (
-            $classMetadata->isIdentifier($propName)
-            && $classMetadata->generatorType !== ORMClassMetadata::GENERATOR_TYPE_NONE
+            $this->skipIdentifiers
+            && $classMetadata->isIdentifier($propName)
             && !$classMetadata->isIdentifierComposite
         ) {
-            $ignore = true;
+            // a) Generated IDs
+            $hasGenerator = $classMetadata->generatorType !== ORMClassMetadata::GENERATOR_TYPE_NONE;
+
+            // b) UUID/ULID-like scalar types (sometimes filled outside Doctrine's generator)
+            $fieldType = $classMetadata->hasField($propName)
+                ? (string)$classMetadata->getTypeOfField($propName)
+                : null;
+
+            $uuidLikeTypes = [
+                'guid',
+                'uuid',
+                'uuid_binary',
+                'uuid_binary_ordered_time',
+                'ulid',
+                'ulid_binary',
+            ];
+
+            $isUuidLike = $fieldType !== null && in_array($fieldType, $uuidLikeTypes, true);
+
+            if ($hasGenerator || $isUuidLike) {
+                $ignore = true;
+            }
         }
 
-        $mapped = true;
-        try {
-            $classMetadata->getReflectionProperty($propName);
-        } catch (\Exception) {
-            $mapped = false;
+        // 2) Is this property mapped by Doctrine?
+        $isMappedField = $classMetadata->hasField($propName);
+        $isMappedAssoc = $classMetadata->hasAssociation($propName);
+        $isEmbedded = !empty($classMetadata->embeddedClasses)
+            && array_key_exists($propName, $classMetadata->embeddedClasses);
+
+        $mapped = $isMappedField || $isMappedAssoc || $isEmbedded;
+
+        // 3) Optionally skip empty strings for nullable scalar fields
+        if (
+            $this->skipEmptyStrings
+            && $isMappedField
+            && is_string($valueContext->getValue())
+            && trim($valueContext->getValue()) === ''
+        ) {
+            $fieldMapping = $classMetadata->getFieldMapping($propName);
+            $nullable = $fieldMapping['nullable'] ?? false;
+
+            if ($nullable) {
+                return true;
+            }
         }
 
         return $ignore || !$mapped;

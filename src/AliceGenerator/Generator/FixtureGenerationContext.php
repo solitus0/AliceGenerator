@@ -22,7 +22,7 @@ class FixtureGenerationContext
      * Whether to skip properties that are not writable using Symfony's PropertyAccessor.
      * If true, only writable properties will be included in the generated fixture.
      */
-    private bool $skipNonWritableProperties = false;
+    private bool $skipNonWritableProperties = true;
 
     /**
      * @var callable[] Callbacks to skip specific collection items.

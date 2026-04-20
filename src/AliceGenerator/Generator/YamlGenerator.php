@@ -8,8 +8,10 @@ use Symfony\Component\Yaml\Yaml;
 
 class YamlGenerator implements GeneratorInterface
 {
-    public function __construct(private readonly int $inline, private readonly int $indent)
-    {
+    public function __construct(
+        private readonly int $inline,
+        private readonly int $indent
+    ) {
     }
 
     public function generate(array $data): string

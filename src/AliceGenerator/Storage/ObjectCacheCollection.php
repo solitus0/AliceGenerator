@@ -12,7 +12,6 @@ use Doctrine\Common\Collections\ArrayCollection;
 class ObjectCacheCollection extends AbstractCollection
 {
     public const OBJECT_SKIPPED = 'CACHE_STORE_OBJECT_SKIPPED';
-
     public const OBJECT_NOT_FOUND = 'CACHE_STORE_OBJECT_NOT_FOUND';
 
     /**

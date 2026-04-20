@@ -24,6 +24,7 @@ class CollectionHandler implements ObjectHandlerInterface
             $valueContext->getContextObjectClass()
         )) {
             $valueContext->setSkipped(true);
+
             return true;
         }
 

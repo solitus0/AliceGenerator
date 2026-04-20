@@ -66,7 +66,7 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
 
             // b) UUID/ULID-like scalar types (sometimes filled outside Doctrine's generator)
             $fieldType = $classMetadata->hasField($propName)
-                ? (string)$classMetadata->getTypeOfField($propName)
+                ? (string) $classMetadata->getTypeOfField($propName)
                 : null;
 
             $uuidLikeTypes = [

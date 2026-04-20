@@ -141,6 +141,7 @@ class ValueVisitor
 
                         $this->objectCacheByClass->skip($object);
                         $valueContext->setSkipped(true);
+
                         return;
                     }
 

@@ -79,6 +79,7 @@ class FixtureGeneratorBuilder
     public function configureObjectHandlerRegistry(\Closure $configure): self
     {
         $configure($this->objectHandlerRegistry);
+
         return $this;
     }
 

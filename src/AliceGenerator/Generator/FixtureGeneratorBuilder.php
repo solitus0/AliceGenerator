@@ -117,6 +117,7 @@ class FixtureGeneratorBuilder
                 $this->objectHandlerRegistry,
                 $this->propertyNamer,
                 $this->referenceNamer,
+                new FixtureWriteRouteResolver(),
             ),
             $this->generator
         );

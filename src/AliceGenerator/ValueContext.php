@@ -41,6 +41,9 @@ class ValueContext
                 // Step 2: revert inside Alice expression at runtime
                 return "<htmlspecialchars_decode('$s', 3)>";
             }
+
+            // Alice tokenizes any literal $... fragment as a variable reference, so escape every unescaped dollar sign.
+            return preg_replace('/(?<!\\\\)\$/', '\\\\$', $s);
         }
 
         return $this->value;

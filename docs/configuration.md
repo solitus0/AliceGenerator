@@ -103,13 +103,30 @@ $context = FixtureGeneratorBuilder::create()
 
 ### Skipping Non-Writable Properties
 
-By default, properties that are not writable via Symfony’s PropertyAccessor (e.g., private or read-only properties without setters) are skipped during fixture generation.
+By default, the generator prefers constructor routing for constructor-backed private state, and otherwise falls back to normal Alice property assignment whenever Symfony’s PropertyAccessor can write the value safely. That keeps constructor-only DTOs valid while preserving hydration order for regular setter-backed entities whose child fixtures depend on those values during graph construction.
+
+For values that are not PropertyAccessor-writable, the generator next tries constructor routing:
+- matching constructor parameters are emitted under `__construct`
+
+If no safe property or constructor route can be derived, non-writable values are skipped during fixture generation.
 
 If you want to include such properties, you can disable this behavior by setting the skipNonWritableProperties flag to false in the context:
 
 ```php
 $context = FixtureGenerationContext::create()
     ->setSkipNonWritableProperties(false);
+```
+
+Example generated output:
+
+```yaml
+App\Security\ApiAuthentication\Entity\ApiKey:
+    ApiKey-CommandRunner:
+        __construct:
+            - 'token'
+            - 'command_runner'
+            - ['ROLE_COMMAND_RUNNER']
+        createdAt: '<(new \DateTime("2024-01-01 00:00:00", new \DateTimeZone("UTC")))>'
 ```
 
 ### Output Format

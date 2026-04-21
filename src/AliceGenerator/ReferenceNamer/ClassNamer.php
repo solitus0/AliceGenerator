@@ -8,8 +8,9 @@ use Doctrine\Common\Util\ClassUtils;
 
 class ClassNamer implements ReferenceNamerInterface
 {
-    public function __construct(private int $referenceOffset = 0)
-    {
+    public function __construct(
+        private int $referenceOffset = 0
+    ) {
     }
 
     public function createReference(object $object, int $key): string

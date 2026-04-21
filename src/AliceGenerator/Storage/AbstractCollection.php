@@ -11,8 +11,9 @@ abstract class AbstractCollection
 {
     private array $collections = [];
 
-    public function __construct(private MetadataHandlerInterface $metadataHandler)
-    {
+    public function __construct(
+        private MetadataHandlerInterface $metadataHandler
+    ) {
     }
 
     public function setMetadataHandler(MetadataHandlerInterface $handler): self

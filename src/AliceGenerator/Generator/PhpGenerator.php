@@ -10,6 +10,6 @@ final class PhpGenerator implements GeneratorInterface
     {
         $exported = var_export($data, true);
 
-        return "<?php" . "\n\nreturn " . $exported . ";";
+        return '<?php' . "\n\nreturn " . $exported . ';';
     }
 }

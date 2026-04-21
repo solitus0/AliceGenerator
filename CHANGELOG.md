@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.1.5] – 2026-04-21
+
+### Added
+- **Constructor and setter emission for matching values**  
+  Non-writable values are now routed through Alice special keys: matching constructor parameters are emitted under
+  `__construct`, and when constructor arguments cannot be resolved, matching public single-argument setters are
+  emitted under `__calls`.
+
 ## [v0.1.4] – 2025-08-10
 
 ### Added
@@ -58,4 +66,3 @@
 - Minor API naming consistency improvements for collection-related configuration methods.
 
 ---
-

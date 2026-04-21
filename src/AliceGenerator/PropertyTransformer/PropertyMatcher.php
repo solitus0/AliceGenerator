@@ -8,8 +8,9 @@ use Solitus0\AliceGenerator\Metadata\PropertyMetadata;
 
 class PropertyMatcher implements PropertyMatcherInterface
 {
-    public function __construct(private string $property)
-    {
+    public function __construct(
+        private string $property
+    ) {
     }
 
     public function matches(PropertyMetadata $metadata): bool

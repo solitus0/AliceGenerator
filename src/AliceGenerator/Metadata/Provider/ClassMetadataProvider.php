@@ -9,8 +9,9 @@ use Solitus0\AliceGenerator\Metadata\PropertyMetadata;
 
 class ClassMetadataProvider implements ClassMetadataProviderInterface
 {
-    public function __construct(private readonly MetadataFactoryInterface $metadataFactory)
-    {
+    public function __construct(
+        private readonly MetadataFactoryInterface $metadataFactory
+    ) {
     }
 
     /**

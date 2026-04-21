@@ -19,7 +19,6 @@ class AttributeDriver implements DriverInterface
         foreach ($class->getProperties() as $property) {
             $propertyMetadata = new PropertyMetadata($name, $property->getName());
 
-
             $mergeableClassMetadata->addPropertyMetadata($propertyMetadata);
         }
 

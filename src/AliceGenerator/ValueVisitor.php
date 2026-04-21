@@ -7,6 +7,7 @@ namespace Solitus0\AliceGenerator;
 use Solitus0\AliceGenerator\Exception\InvalidPropertyNameException;
 use Solitus0\AliceGenerator\Exception\UnknownObjectTypeException;
 use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
+use Solitus0\AliceGenerator\Generator\FixtureWriteRouteResolver;
 use Solitus0\AliceGenerator\Metadata\Provider\ClassMetadataProviderInterface;
 use Solitus0\AliceGenerator\Metadata\Resolver\MetadataResolverInterface;
 use Solitus0\AliceGenerator\MetadataHandler\MetadataHandlerInterface;
@@ -16,8 +17,6 @@ use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRulesCollection
 use Solitus0\AliceGenerator\PropertyTransformer\ValueTransformerInterface;
 use Solitus0\AliceGenerator\ReferenceNamer\ReferenceNamerInterface;
 use Solitus0\AliceGenerator\Storage\ObjectCacheCollection;
-use Symfony\Component\PropertyAccess\PropertyAccess;
-use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
 
 class ValueVisitor
 {
@@ -31,8 +30,6 @@ class ValueVisitor
 
     private int $recursionDepth = 0;
 
-    private PropertyAccessorInterface $propertyAccessor;
-
     public function __construct(
         private readonly ClassMetadataProviderInterface $classMetadataProvider,
         private readonly MetadataHandlerInterface $handler,
@@ -40,8 +37,8 @@ class ValueVisitor
         private readonly ObjectHandlerRegistryInterface $objectHandlerRegistry,
         private readonly PropertyNamerInterface $propertyNamer,
         private readonly ReferenceNamerInterface $referenceNamer,
+        private readonly FixtureWriteRouteResolver $fixtureWriteRouteResolver,
     ) {
-        $this->propertyAccessor = PropertyAccess::createPropertyAccessor();
     }
 
     public function getGenerationContext(): FixtureGenerationContext
@@ -141,6 +138,7 @@ class ValueVisitor
 
                         $this->objectCacheByClass->skip($object);
                         $valueContext->setSkipped(true);
+
                         return;
                     }
 
@@ -175,7 +173,9 @@ class ValueVisitor
         $class = $this->handler->getClass($object);
         $this->handler->preHandle($object);
 
-        $saveValues = [];
+        $properties = [];
+        $constructorCandidates = [];
+        $setterCandidates = [];
         $this->recursionDepth++;
 
         $reflectionClass = new \ReflectionClass($class);
@@ -211,21 +211,87 @@ class ValueVisitor
                 continue;
             }
 
-            if ($this->generationContext->shouldSkipNonWritableProperties()) {
-                if (!$this->propertyAccessor->isWritable($object, $propertyMetadata->name)) {
-                    continue;
-                }
-            }
-
             $propName = $this->propertyNamer->createName($valueContext);
             if ($propName === '' || $propName === '0') {
                 throw new InvalidPropertyNameException('Property name must be a non empty string.');
             }
 
-            $saveValues[$propName] = $valueContext->getValue();
+            $writeRoute = $this->fixtureWriteRouteResolver->resolve($object, $reflectionClass, $reflectionProperty, $propName);
+            $normalizedValue = $valueContext->getValue();
+
+            if ($writeRoute['type'] === 'property') {
+                $properties[$propName] = $normalizedValue;
+
+                continue;
+            }
+
+            if ($writeRoute['type'] === 'constructor') {
+                $constructorCandidates[] = [
+                    'position' => $writeRoute['position'],
+                    'property' => $propName,
+                    'value' => $normalizedValue,
+                ];
+
+                continue;
+            }
+
+            if ($writeRoute['type'] === 'setter') {
+                $setterCandidates[] = [
+                    'method' => $writeRoute['method'],
+                    'property' => $propName,
+                    'value' => $normalizedValue,
+                ];
+
+                continue;
+            }
+
+            if (!$this->generationContext->shouldSkipNonWritableProperties()) {
+                $properties[$propName] = $normalizedValue;
+            }
         }
 
         $this->recursionDepth--;
+
+        $saveValues = [];
+
+        $constructorArguments = $this->fixtureWriteRouteResolver->buildConstructorArguments(
+            $reflectionClass,
+            $constructorCandidates
+        );
+        if ($constructorArguments !== null) {
+            $saveValues['__construct'] = $constructorArguments;
+        } else {
+            foreach ($constructorCandidates as $candidate) {
+                $setterMethod = $this->fixtureWriteRouteResolver->findSetterMethod(
+                    $reflectionClass,
+                    $candidate['property']
+                );
+                if ($setterMethod !== null) {
+                    $setterCandidates[] = [
+                        'method' => $setterMethod,
+                        'property' => $candidate['property'],
+                        'value' => $candidate['value'],
+                    ];
+
+                    continue;
+                }
+
+                if (!$this->generationContext->shouldSkipNonWritableProperties()) {
+                    $properties[$candidate['property']] = $candidate['value'];
+                }
+            }
+        }
+
+        foreach ($properties as $property => $value) {
+            $saveValues[$property] = $value;
+        }
+
+        if ($setterCandidates !== []) {
+            $saveValues['__calls'] = array_map(
+                static fn (array $candidate): array => [$candidate['method'] => [$candidate['value']]],
+                $setterCandidates
+            );
+        }
 
         if ($saveValues === []) {
             return false;

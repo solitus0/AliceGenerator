@@ -33,8 +33,13 @@ Available implementations:
 
 Interface for transforming a value.
 
+```php
+public function transform(ValueContext $valueContext): void;
+```
+
 Available implementations:
 - `SimpleValueTransformer` — replaces value with a static one
+- `CallbackValueTransformer` — derives a value from the current `ValueContext`
 
 ---
 
@@ -59,13 +64,13 @@ $context = FixtureGenerationContext::create()
 Ensure all passwords are set to a safe default when generating test fixtures:
 
 ```php
-use Solitus0\AliceGenerator\Transformer\ClassPropertyMatcher;
-use Solitus0\AliceGenerator\Transformer\SimpleValueTransformer;
-use Solitus0\AliceGenerator\Transformer\PropertyTransformRule;
+use Solitus0\AliceGenerator\PropertyTransformer\ClassPropertyMatcher;
+use Solitus0\AliceGenerator\PropertyTransformer\SimpleValueTransformer;
+use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRule;
 
 $context->addPropertyTransformRule(
     new PropertyTransformRule(
-        new ClassPropertyMatcher(App\Entity\User::class, 'password'),
+        new ClassPropertyMatcher(\App\Entity\User::class, 'password'),
         new SimpleValueTransformer('test-password')
     )
 );
@@ -80,13 +85,14 @@ $context->addPropertyTransformRule(
 Implement your own transformer:
 
 ```php
-use Solitus0\AliceGenerator\Transformer\ValueTransformerInterface;
+use Solitus0\AliceGenerator\PropertyTransformer\ValueTransformerInterface;
+use Solitus0\AliceGenerator\ValueContext;
 
 class RandomIntTransformer implements ValueTransformerInterface
 {
-    public function transform(mixed $value): mixed
+    public function transform(ValueContext $valueContext): void
     {
-        return random_int(1, 100);
+        $valueContext->setValue(random_int(1, 100));
     }
 }
 ```

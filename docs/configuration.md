@@ -20,7 +20,7 @@ $generator = FixtureGeneratorBuilder::create()
 The `DoctrineMetadataHandler` automatically:
 - Excludes identifiers and unmapped properties from fixtures
 - Handles Doctrine proxy objects
-- Dumps only managed entities
+- Uses Doctrine metadata to process mapped entities
 
 ## Naming Strategies
 
@@ -35,7 +35,7 @@ use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
 use App\Alice\Naming\CustomPropertyNamer;
 
 $generator = FixtureGeneratorBuilder::create()
-    ->setPropertyNamer(new PropertyNamer())
+    ->setPropertyNamer(new CustomPropertyNamer())
     ->build();
 ```
 
@@ -43,7 +43,7 @@ $generator = FixtureGeneratorBuilder::create()
 
 Reference keys used in generated fixtures (e.g., `@User-1`) are created by a **Reference Namer**.
 
-You can configure a custom reference namer in the fixture generation context:
+You can configure a custom reference namer on the fixture generator builder:
 
 ---
 
@@ -64,8 +64,9 @@ use Solitus0\AliceGenerator\ReferenceNamer\ClassNamer;
 // Creates references like @User-101, @Product-101
 $namer = new ClassNamer(referenceOffset: 100);
 
-$context = FixtureGeneratorBuilder::create()
-  ->setReferenceNamer($namer);
+$generator = FixtureGeneratorBuilder::create()
+    ->setReferenceNamer($namer)
+    ->build();
 ```
 ---
 
@@ -83,19 +84,20 @@ use Solitus0\AliceGenerator\ReferenceNamer\CallbackNamer;
 
 // Creates references like @User-example@example.com
 $namer = new CallbackNamer(
-  callback: static function (object $obj, int $index): string {
-      $short = (new \ReflectionClass($obj))->getShortName();
-      if ($obj instanceof EmailAwareInterface) {
-          return sprintf('%s-%s', $short, $obj->getEmail());
-      }
+    callback: static function (object $obj, int $index): string {
+        $short = (new \ReflectionClass($obj))->getShortName();
+        if ($obj instanceof EmailAwareInterface) {
+            return sprintf('%s-%s', $short, $obj->getEmail());
+        }
 
-      // Fallback: Short class name + index, e.g. "@User-1"
-      return sprintf('%s-%d', $short, $index);
-  }
+        // Fallback: Short class name + index, e.g. "@User-1"
+        return sprintf('%s-%d', $short, $index);
+    }
 );
 
-$context = FixtureGeneratorBuilder::create()
-  ->setReferenceNamer($namer);
+$generator = FixtureGeneratorBuilder::create()
+    ->setReferenceNamer($namer)
+    ->build();
 ```
 
 ---
@@ -103,12 +105,13 @@ $context = FixtureGeneratorBuilder::create()
 
 ### Skipping Non-Writable Properties
 
-By default, the generator prefers constructor routing for constructor-backed private state, and otherwise falls back to normal Alice property assignment whenever Symfony’s PropertyAccessor can write the value safely. That keeps constructor-only DTOs valid while preserving hydration order for regular setter-backed entities whose child fixtures depend on those values during graph construction.
+By default, the generator prefers constructor routing for constructor-backed private state, and otherwise falls back to normal Alice property assignment whenever Symfony's PropertyAccessor can write the value safely. That keeps constructor-only DTOs valid while preserving hydration order for regular setter-backed entities whose child fixtures depend on those values during graph construction.
 
-For values that are not PropertyAccessor-writable, the generator next tries constructor routing:
+For values that are not PropertyAccessor-writable, the generator tries these routes in order:
 - matching constructor parameters are emitted under `__construct`
+- matching public setters are emitted under `__calls`
 
-If no safe property or constructor route can be derived, non-writable values are skipped during fixture generation.
+If no safe property, constructor, or setter route can be derived, non-writable values are skipped during fixture generation.
 
 If you want to include such properties, you can disable this behavior by setting the skipNonWritableProperties flag to false in the context:
 

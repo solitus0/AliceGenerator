@@ -11,7 +11,7 @@ By default, AliceGenerator registers handlers for:
 - `DateTimeHandler` for `\DateTime`
 - `DateTimeImmutableHandler` for `\DateTimeImmutable`
 - `EnumHandler` for PHP enums
-- `RamseyUuidHandler` for UUIDs
+- `RamseyUuidHandler` for `Ramsey\Uuid\Lazy\LazyUuidFromString`
 
 ## Implementing a Custom Handler
 
@@ -21,7 +21,7 @@ To add support for a custom type, create a class that implements `ObjectHandlerI
 namespace App\Alice\ObjectHandler;
 
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerInterface;
-use Solitus0\AliceGenerator\DataStorage\ValueContext;
+use Solitus0\AliceGenerator\ValueContext;
 use libphonenumber\PhoneNumber;
 use libphonenumber\PhoneNumberFormat;
 use libphonenumber\PhoneNumberUtil;

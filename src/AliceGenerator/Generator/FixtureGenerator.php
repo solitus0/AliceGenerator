@@ -16,10 +16,7 @@ class FixtureGenerator
 
     public function generate($value, FixtureGenerationContext $generationContext): string
     {
-        $this->valueVisitor->setup($generationContext);
-        $this->valueVisitor->visitSimpleValue($value);
-
-        $results = $this->valueVisitor->getResults();
+        $results = $this->valueVisitor->collectFixtures($value, $generationContext);
 
         ksort($results, SORT_NATURAL);
         foreach ($results as &$result) {

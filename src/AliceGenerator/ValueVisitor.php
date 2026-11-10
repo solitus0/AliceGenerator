@@ -8,6 +8,7 @@ use Solitus0\AliceGenerator\Exception\InvalidPropertyNameException;
 use Solitus0\AliceGenerator\Exception\UnavailableObjectException;
 use Solitus0\AliceGenerator\Exception\UnknownObjectTypeException;
 use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
+use Solitus0\AliceGenerator\Generator\FixtureGraph;
 use Solitus0\AliceGenerator\Generator\FixtureWriteRouteResolver;
 use Solitus0\AliceGenerator\Metadata\Provider\ClassMetadataProviderInterface;
 use Solitus0\AliceGenerator\Metadata\Resolver\MetadataResolverInterface;
@@ -16,25 +17,14 @@ use Solitus0\AliceGenerator\MetadataHandler\NonSpecificMetadataHandler;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistryInterface;
 use Solitus0\AliceGenerator\PropertyNamer\PropertyNamer;
 use Solitus0\AliceGenerator\PropertyNamer\PropertyNamerInterface;
-use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRulesCollection;
 use Solitus0\AliceGenerator\PropertyTransformer\ValueTransformerInterface;
 use Solitus0\AliceGenerator\ReferenceNamer\ReferenceNamerInterface;
-use Solitus0\AliceGenerator\Storage\ObjectCacheCollection;
 
 class ValueVisitor
 {
-    private ObjectCacheCollection $objectCacheByClass;
+    private FixtureGraph $graph;
 
-    private FixtureGenerationContext $generationContext;
-
-    private PropertyTransformRulesCollection $transformRulesCollection;
-
-    private array $results = [];
-
-    /** @var list<string> */
-    private array $discardedReferences = [];
-
-    private int $recursionDepth = 0;
+    private bool $collectingFixtures = false;
 
     public function __construct(
         private readonly ClassMetadataProviderInterface $classMetadataProvider,
@@ -49,51 +39,40 @@ class ValueVisitor
 
     public function getGenerationContext(): FixtureGenerationContext
     {
-        return $this->generationContext;
+        return $this->graph->context;
     }
 
     public function setup(FixtureGenerationContext $generationContext): void
     {
-        $this->generationContext = $generationContext;
+        $this->graph = new FixtureGraph($generationContext, $this->handler, $this->referenceNamer);
+        $generationContext->getConstraintsCollection()->setMetadataHandler($this->handler);
+    }
 
-        $this->recursionDepth = 0;
-        $this->results = [];
-        $this->discardedReferences = [];
-        $this->objectCacheByClass = new ObjectCacheCollection($this->handler);
-        $this->generationContext->getConstraintsCollection()->setMetadataHandler($this->handler);
-        $this->transformRulesCollection = $this->generationContext->getTransformRulesCollection();
+    /** @internal */
+    public function collectFixtures(mixed $value, FixtureGenerationContext $generationContext): array
+    {
+        if ($this->collectingFixtures) {
+            $visitor = clone $this;
+            $visitor->collectingFixtures = false;
+
+            return $visitor->collectFixtures($value, $generationContext);
+        }
+
+        $this->collectingFixtures = true;
+
+        try {
+            $this->setup($generationContext);
+            $this->visitSimpleValue($value);
+
+            return $this->getResults();
+        } finally {
+            $this->collectingFixtures = false;
+        }
     }
 
     public function getResults(): array
     {
-        if ($this->discardedReferences === []) {
-            return $this->results;
-        }
-
-        $results = $this->results;
-        $dependents = [];
-        foreach ($results as $class => $fixtures) {
-            foreach ($fixtures as $reference => $definition) {
-                array_walk_recursive($definition, static function (mixed $value) use (&$dependents, $class, $reference): void {
-                    if (is_string($value) && str_starts_with($value, '@')) {
-                        $dependents[$value][$reference] = $class;
-                    }
-                });
-            }
-        }
-
-        // Back-references can be written before the target's fixture is accepted.
-        $discarded = $this->discardedReferences;
-        while (($reference = array_pop($discarded)) !== null) {
-            foreach ($dependents['@' . $reference] ?? [] as $dependent => $class) {
-                if (isset($results[$class][$dependent])) {
-                    unset($results[$class][$dependent]);
-                    $discarded[] = $dependent;
-                }
-            }
-        }
-
-        return array_filter($results);
+        return isset($this->graph) ? $this->graph->getDefinitions() : [];
     }
 
     public function visitSimpleValue(mixed $value): ValueContext
@@ -113,7 +92,8 @@ class ValueVisitor
     {
         $propertyMetadata = $valueContext->getMetadata();
         if ($propertyMetadata) {
-            $valueTransformer = $this->transformRulesCollection->getPropertyTransformer($propertyMetadata);
+            $rules = $this->graph->context->getTransformRulesCollection();
+            $valueTransformer = $rules->getPropertyTransformer($propertyMetadata);
             if ($valueTransformer instanceof ValueTransformerInterface) {
                 $valueTransformer->transform($valueContext);
             }
@@ -183,46 +163,14 @@ class ValueVisitor
         }
 
         if ($hasMetadata) {
-            if (!$this->generationContext->getConstraintsCollection()->isAllowed($object)) {
+            $reference = $this->graph->referenceFor($object, $this->buildFixtureDefinition(...));
+            if ($reference === null) {
                 $valueContext->setSkipped(true);
-
-                return;
+            } else {
+                $valueContext->setValue('@' . $reference);
             }
 
-            $result = $this->objectCacheByClass->find($object);
-            switch ($result) {
-                case ObjectCacheCollection::OBJECT_NOT_FOUND:
-                    if ($this->recursionDepth <= $this->generationContext->getMaximumRecursion()) {
-                        $key = $this->objectCacheByClass->add($object);
-                        $reference = $this->referenceNamer->createReference($object, $key);
-
-                        $objectAdded = $this->handlePersistedObject($object, $reference);
-
-                        if ($objectAdded) {
-                            $valueContext->setValue('@' . $reference);
-
-                            return;
-                        }
-
-                        $this->objectCacheByClass->skip($object);
-                        $this->discardedReferences[] = $reference;
-                        $valueContext->setSkipped(true);
-
-                        return;
-                    }
-
-                    break;
-                case ObjectCacheCollection::OBJECT_SKIPPED:
-                    $valueContext->setSkipped(true);
-
-                    return;
-                default:
-                    $valueContext->setValue('@' . $this->referenceNamer->createReference($object, $result));
-
-                    return;
-            }
-
-            $valueContext->setSkipped(true);
+            return;
         }
 
         if (!$valueContext->isSkipped() && !$valueContext->isModified()) {
@@ -254,21 +202,19 @@ class ValueVisitor
         );
     }
 
-    private function handlePersistedObject(object $object, string $reference): bool
+    /** @return array<string, mixed> */
+    private function buildFixtureDefinition(object $object, string $class): array
     {
-        $class = $this->handler->getClass($object);
-
         try {
             $this->handler->preHandle($object);
         } catch (UnavailableObjectException) {
-            return false;
+            return [];
         }
 
         $prunedGraphValue = false;
-        $this->recursionDepth++;
 
         $reflectionClass = new \ReflectionClass($class);
-        $writePlan = $this->fixtureWriteRouteResolver->createPlan($object, $reflectionClass, $this->generationContext);
+        $writePlan = $this->fixtureWriteRouteResolver->createPlan($object, $reflectionClass, $this->graph->context);
         $newObject = $reflectionClass->newInstanceWithoutConstructor();
         $propertyMetadatas = $this->classMetadataProvider->getPropertyMetadata($reflectionClass);
 
@@ -320,15 +266,6 @@ class ValueVisitor
             $writePlan->addProperty($reflectionProperty, $propName, $valueContext, $constructorOnly);
         }
 
-        $this->recursionDepth--;
-
-        $saveValues = $writePlan->buildDefinition($class, $prunedGraphValue);
-        if ($saveValues === []) {
-            return false;
-        }
-
-        $this->results[$class][$reference] = $saveValues;
-
-        return true;
+        return $writePlan->buildDefinition($class, $prunedGraphValue);
     }
 }

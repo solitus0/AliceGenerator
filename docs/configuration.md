@@ -42,6 +42,7 @@ $generator = FixtureGeneratorBuilder::create()
 ### Reference Namer
 
 Reference keys used in generated fixtures (e.g., `@User-1`) are created by a **Reference Namer**.
+Each object gets one reference name per generation run. Repeated visits reuse that name.
 
 You can configure a custom reference namer on the fixture generator builder:
 

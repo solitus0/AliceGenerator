@@ -9,11 +9,15 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use Solitus0\AliceGenerator\Exception\InvalidArgumentException;
 use Solitus0\AliceGenerator\Exception\InvalidPropertyNameException;
 use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
+use Solitus0\AliceGenerator\Generator\FixtureGenerator;
 use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
 use Solitus0\AliceGenerator\Generator\PhpGenerator;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerInterface;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistryInterface;
 use Solitus0\AliceGenerator\PropertyNamer\PropertyNamerInterface;
+use Solitus0\AliceGenerator\PropertyTransformer\ClassPropertyMatcher;
+use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRule;
+use Solitus0\AliceGenerator\PropertyTransformer\SimpleValueTransformer;
 use Solitus0\AliceGenerator\ReferenceNamer\CallbackNamer;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorDefaultsFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorOnlyFixture;
@@ -160,6 +164,67 @@ final class FixtureRoundTripTest extends FixtureTestCase
         self::assertCount(2, $objects);
     }
 
+    public function testReservesOneNameForASharedFixture(): void
+    {
+        $calls = 0;
+        $generator = FixtureGeneratorBuilder::create()
+            ->setReferenceNamer(new CallbackNamer(static function () use (&$calls): string {
+                return 'fixture-' . ++$calls;
+            }))
+            ->build()
+        ;
+        $shared = new ValueFixture('shared');
+        $source = new ValueFixture([$shared, $shared]);
+
+        $objects = $this->loadFixtures($generator->generate($source, FixtureGenerationContext::create()));
+        $root = $objects['fixture-1'];
+
+        self::assertInstanceOf(ValueFixture::class, $root);
+        self::assertSame([$objects['fixture-2'], $objects['fixture-2']], $root->value);
+        self::assertSame(2, $calls);
+    }
+
+    public function testNestedGenerationKeepsItsOwnGraphAndRecursionLimit(): void
+    {
+        $child = new ValueFixture(['outer child', new ValueFixture('outside the outer limit')]);
+        $source = new ValueFixture($child);
+        $generator = null;
+        $nestedFixture = '';
+        $generator = FixtureGeneratorBuilder::create()
+            ->setReferenceNamer(new CallbackNamer(static function (object $object, int $index) use (
+                $child,
+                &$generator,
+                &$nestedFixture,
+            ): string {
+                if ($object === $child) {
+                    self::assertInstanceOf(FixtureGenerator::class, $generator);
+                    $nestedFixture = $generator->generate(
+                        new WritablePropertyFixture('inner'),
+                        FixtureGenerationContext::create(),
+                    );
+                }
+
+                return ($object instanceof ValueFixture ? 'outer-' : 'inner-') . $index;
+            }))
+            ->build()
+        ;
+
+        $outer = $this->loadFixtures($generator->generate(
+            $source,
+            FixtureGenerationContext::create()->setMaximumRecursion(1),
+        ));
+        $inner = $this->loadFixtures($nestedFixture);
+
+        self::assertSame(['outer-1', 'outer-2'], array_keys($outer));
+        self::assertSame(['inner-1'], array_keys($inner));
+        self::assertInstanceOf(ValueFixture::class, $outer['outer-1']);
+        self::assertInstanceOf(ValueFixture::class, $outer['outer-2']);
+        self::assertInstanceOf(WritablePropertyFixture::class, $inner['inner-1']);
+        self::assertSame($outer['outer-2'], $outer['outer-1']->value);
+        self::assertSame(['outer child'], $outer['outer-2']->value);
+        self::assertSame('inner', $inner['inner-1']->name);
+    }
+
     public function testSkipsAFixtureWhoseRequiredRelationIsOutsideTheRecursionLimit(): void
     {
         $source = new RequiredRelationFixture(new ValueFixture('related'), 'parent');
@@ -182,6 +247,25 @@ final class FixtureRoundTripTest extends FixtureTestCase
         $objects = $this->loadFixtures($this->generate([$parent, new WritablePropertyFixture('kept')]));
 
         self::assertSame(['WritablePropertyFixture-1'], array_keys($objects));
+    }
+
+    public function testPrunesAnExplicitReferenceAndKeepsLiteralTextWithTheSameValue(): void
+    {
+        $reference = '@UnwritableStateFixture-1';
+        $context = FixtureGenerationContext::create()->addPropertyTransformRule(new PropertyTransformRule(
+            new ClassPropertyMatcher(ValueFixture::class, 'value'),
+            new SimpleValueTransformer($reference),
+        ));
+
+        $objects = $this->loadFixtures($this->generate([
+            new UnwritableStateFixture(),
+            new ValueFixture('replace this'),
+            new WritablePropertyFixture($reference),
+        ], $context));
+
+        self::assertSame(['WritablePropertyFixture-1'], array_keys($objects));
+        self::assertInstanceOf(WritablePropertyFixture::class, $objects['WritablePropertyFixture-1']);
+        self::assertSame($reference, $objects['WritablePropertyFixture-1']->name);
     }
 
     public function testExportsObjectsFromARootDoctrineCollection(): void

@@ -116,8 +116,13 @@ By default, the generator prefers constructor routing for constructor-backed pri
 For values that are not PropertyAccessor-writable, the generator tries these routes in order:
 - matching constructor parameters are emitted under `__construct`
 - matching public instance setters are emitted under `__calls`
+- a Doctrine collection with exact-name public instance add and remove methods accepting the same object type can
+  emit one adder call per selected item under `__calls`. The calls append to the collection initialized by the constructor.
 
-If no safe property, constructor, or setter route can be derived, non-writable values are skipped during fixture generation.
+If no safe write route can be derived, non-writable values are skipped during fixture generation.
+
+With Doctrine metadata, an unwritable inverse one-to-many collection can still discover children. The generated
+fixtures restore the relationship through each child's owning association and omit the parent collection field.
 
 If you want to include such properties, you can disable this behavior by setting the skipNonWritableProperties flag to false in the context:
 

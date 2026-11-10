@@ -4,14 +4,19 @@ declare(strict_types=1);
 
 namespace Solitus0\AliceGenerator;
 
+use Doctrine\Common\Collections\Collection;
 use Solitus0\AliceGenerator\Exception\UnavailableObjectException;
 use Solitus0\AliceGenerator\Exception\UnknownObjectTypeException;
 use Solitus0\AliceGenerator\Generator\CollectionSelection;
+use Solitus0\AliceGenerator\Generator\DeferredStringable;
+use Solitus0\AliceGenerator\Generator\FinalizedFixtureWrites;
 use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
 use Solitus0\AliceGenerator\Generator\FixtureGraph;
 use Solitus0\AliceGenerator\Generator\FixtureWriteRouteResolver;
+use Solitus0\AliceGenerator\Generator\StringableWriteMode;
 use Solitus0\AliceGenerator\Metadata\Provider\ClassMetadataProviderInterface;
 use Solitus0\AliceGenerator\Metadata\Resolver\MetadataResolverInterface;
+use Solitus0\AliceGenerator\MetadataHandler\DoctrineMetadataHandler;
 use Solitus0\AliceGenerator\MetadataHandler\MetadataHandlerInterface;
 use Solitus0\AliceGenerator\MetadataHandler\NonSpecificMetadataHandler;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistryInterface;
@@ -140,18 +145,55 @@ class ValueVisitor
         }
 
         $valueContext->setSourceValue($items);
+        $visitSelected = $valueContext->getSelectedCollectionVisitor();
+        if ($visitSelected !== null) {
+            $visitSelected($items);
+
+            return;
+        }
+
         $this->visitArray($valueContext);
+    }
+
+    private function visitUnwritableCollection(ValueContext $valueContext, ?string $adderItemType): bool
+    {
+        if ($adderItemType === null) {
+            $this->discoverInverseCollection($valueContext);
+
+            return false;
+        }
+
+        $useAdder = false;
+        $valueContext->withSelectedCollectionVisitor(
+            function (array $items) use ($valueContext, $adderItemType, &$useAdder): void {
+                foreach ($items as $item) {
+                    if (!is_object($item) || !is_a($item, $adderItemType)) {
+                        $useAdder = false;
+                        $this->discoverInverseCollection($valueContext);
+
+                        return;
+                    }
+                }
+
+                $useAdder = true;
+                $this->visitArray($valueContext);
+            },
+            fn () => $this->visitValue($valueContext, preserveEmptyArrays: false),
+        );
+
+        return $useAdder;
     }
 
     private function visitArrayValue(ValueContext $valueContext, bool $preserveEmptyArrays): void
     {
         $array = $valueContext->getUnencodedValue();
         $keepEmpty = $preserveEmptyArrays && $array === [];
-        $allowsStringable = $valueContext->allowsStringableArrayItems();
+        $stringableMode = $valueContext->getStringableWriteMode(arrayItem: true);
 
         $items = [];
         foreach ($array as $key => $item) {
-            $itemValueContext = new ValueContext($item, valueVisitor: $this, allowsStringable: $allowsStringable);
+            $itemValueContext = new ValueContext($item, valueVisitor: $this);
+            $itemValueContext->setStringableWriteMode($stringableMode);
             if ($preserveEmptyArrays && is_array($item)) {
                 $this->visitArrayValue($itemValueContext, preserveEmptyArrays: true);
             } else {
@@ -170,6 +212,26 @@ class ValueVisitor
         }
     }
 
+    private function discoverInverseCollection(ValueContext $valueContext): void
+    {
+        $owner = $valueContext->getContextObject();
+        $collection = $valueContext->getUnencodedValue();
+        if (!$this->handler instanceof DoctrineMetadataHandler || $owner === null
+            || (!$collection instanceof Collection && !is_array($collection))
+        ) {
+            return;
+        }
+
+        $owningField = $this->handler->findOwningFieldForInverseCollection($owner, $valueContext->getPropName());
+        if ($owningField !== null) {
+            $this->graph->discoverInverseCollection($owner, $owningField, function () use ($valueContext): mixed {
+                $this->visitValue($valueContext, preserveEmptyArrays: false);
+
+                return $valueContext->isSkipped() ? null : $valueContext->getUnencodedValue();
+            });
+        }
+    }
+
     public function visitObject(ValueContext $valueContext): void
     {
         $object = $valueContext->getValue();
@@ -181,43 +243,66 @@ class ValueVisitor
             !$objectHandled
             && $object instanceof \Stringable
             && (!$hasMetadata || $this->handler::class === NonSpecificMetadataHandler::class)
-            && $valueContext->allowsStringable()
         ) {
-            $valueContext->setLiteralString((string) $object);
+            $mode = $valueContext->getStringableWriteMode();
+            if ($mode === StringableWriteMode::Text) {
+                $valueContext->setLiteralString((string) $object);
 
-            return;
+                return;
+            }
+
+            if ($mode->dependsOnConstructor()) {
+                $valueContext->setSourceValue(new DeferredStringable(
+                    $object,
+                    $mode,
+                    fn (): ?AliceExpression => $hasMetadata
+                        ? $this->visitFixtureReference($object)
+                        : throw $this->unknownObjectType($object),
+                ));
+
+                return;
+            }
         }
 
         if ($hasMetadata) {
-            $reference = $this->graph->referenceFor($object, $this->buildFixtureDefinition(...));
+            $reference = $this->visitFixtureReference($object);
             if ($reference === null) {
                 $valueContext->setSkipped(true);
             } else {
-                $valueContext->setSourceValue(AliceExpression::reference($reference));
+                $valueContext->setSourceValue($reference);
             }
 
             return;
         }
 
         if (!$valueContext->isSkipped() && !$valueContext->isModified()) {
-            throw new UnknownObjectTypeException(
-                sprintf(
-                    'Object of unknown type "%s" encountered during generation. Unknown types can\'t be serialized ' .
-                    'directly. You can create an ObjectHandler for this type, or supply metadata on the property for' .
-                    'how this should be handled.',
-                    get_debug_type($valueContext->getValue())
-                )
-            );
+            throw $this->unknownObjectType($valueContext->getValue());
         }
     }
 
-    /** @return array<string, mixed> */
-    private function buildFixtureDefinition(object $object, string $class): array
+    private function visitFixtureReference(object $object): ?AliceExpression
+    {
+        $reference = $this->graph->referenceFor($object, $this->buildFixtureDefinition(...));
+
+        return $reference === null ? null : AliceExpression::reference($reference);
+    }
+
+    private function unknownObjectType(mixed $value): UnknownObjectTypeException
+    {
+        return new UnknownObjectTypeException(sprintf(
+            'Object of unknown type "%s" encountered during generation. Unknown types can\'t be serialized ' .
+            'directly. You can create an ObjectHandler for this type, or supply metadata on the property for ' .
+            'how this should be handled.',
+            get_debug_type($value),
+        ));
+    }
+
+    private function buildFixtureDefinition(object $object, string $class): ?FinalizedFixtureWrites
     {
         try {
             $this->handler->preHandle($object);
         } catch (UnavailableObjectException) {
-            return [];
+            return null;
         }
 
         $reflectionClass = new \ReflectionClass($class);
@@ -277,6 +362,7 @@ class ValueVisitor
                 $valueContext,
                 $constructorOnly,
                 $visit ? $visitProperty : null,
+                $this->visitUnwritableCollection(...),
             );
         }
 

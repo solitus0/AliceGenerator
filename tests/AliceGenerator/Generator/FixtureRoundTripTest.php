@@ -24,9 +24,12 @@ use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRule;
 use Solitus0\AliceGenerator\PropertyTransformer\SimpleValueTransformer;
 use Solitus0\AliceGenerator\PropertyTransformer\ValueTransformerInterface;
 use Solitus0\AliceGenerator\ReferenceNamer\CallbackNamer;
+use Solitus0\AliceGenerator\Tests\Generator\Fixtures\CollectionAdderFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorDefaultsFixture;
+use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorObjectWithTextSetterFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorOnlyFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorSetterFallbackFixture;
+use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorTextWithObjectSetterFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ExpressionLikeEnum;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\MixedRoutingFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\Other\WritablePropertyFixture as OtherWritablePropertyFixture;
@@ -351,6 +354,66 @@ final class FixtureRoundTripTest extends FixtureTestCase
 
         self::assertInstanceOf(StringableText::class, $fixture);
         self::assertSame('root state', $fixture->text);
+    }
+
+    public function testUsesConstructorTextEvenWhenTheFallbackSetterRequiresAnObject(): void
+    {
+        $source = new ConstructorTextWithObjectSetterFixture('original', new ValueFixture('relation'));
+        $source->setText(new StringableText('@literal'));
+
+        $objects = $this->loadFixtures($this->generate($source));
+        $fixture = $objects['ConstructorTextWithObjectSetterFixture-1'];
+
+        self::assertInstanceOf(ConstructorTextWithObjectSetterFixture::class, $fixture);
+        self::assertSame('@literal', $fixture->getText());
+        self::assertSame($objects['ValueFixture-1'], $fixture->relation);
+        self::assertCount(2, $objects);
+    }
+
+    public function testUsesTheObjectForSetterFallbackAfterARequiredRelationIsPruned(): void
+    {
+        $source = new ConstructorTextWithObjectSetterFixture('original', new ValueFixture());
+        $source->setText(new StringableText('fallback object'));
+        $context = FixtureGenerationContext::create()->allowConstructorBypassFor($source::class);
+
+        $objects = $this->loadFixtures($this->generate($source, $context));
+        $fixture = $objects['ConstructorTextWithObjectSetterFixture-1'];
+
+        self::assertInstanceOf(ConstructorTextWithObjectSetterFixture::class, $fixture);
+        self::assertSame($objects['StringableText-1'], $fixture->getText());
+        self::assertCount(2, $objects);
+    }
+
+    public function testUsesTextForSetterFallbackEvenWhenTheConstructorRequiresAnObject(): void
+    {
+        $source = new ConstructorObjectWithTextSetterFixture(new StringableText('@fallback'), new ValueFixture());
+        $context = FixtureGenerationContext::create()
+            ->setMaximumRecursion(0)
+            ->allowConstructorBypassFor($source::class)
+        ;
+
+        $objects = $this->loadFixtures($this->generate($source, $context));
+        $fixture = $objects['ConstructorObjectWithTextSetterFixture-1'];
+
+        self::assertInstanceOf(ConstructorObjectWithTextSetterFixture::class, $fixture);
+        self::assertSame('@fallback', $fixture->getText());
+        self::assertCount(1, $objects);
+    }
+
+    public function testReconsidersConstructorAvailabilityWhenTheStringableReferenceIsPruned(): void
+    {
+        $source = new ConstructorObjectWithTextSetterFixture(new StringableText('fallback'), new ValueFixture('relation'));
+        $context = FixtureGenerationContext::create()
+            ->addPersistedObjectConstraint(new StringableText('only allowed object'))
+            ->allowConstructorBypassFor($source::class)
+        ;
+
+        $objects = $this->loadFixtures($this->generate($source, $context));
+        $fixture = $objects['ConstructorObjectWithTextSetterFixture-1'];
+
+        self::assertInstanceOf(ConstructorObjectWithTextSetterFixture::class, $fixture);
+        self::assertSame('fallback', $fixture->getText());
+        self::assertArrayNotHasKey('StringableText-1', $objects);
     }
 
     public function testSharedReferencesStillResolveAfterSkippingAnEmptyObject(): void
@@ -802,6 +865,88 @@ final class FixtureRoundTripTest extends FixtureTestCase
         $root = $reachable['ValueFixture-1'];
         self::assertInstanceOf(ValueFixture::class, $root);
         self::assertSame($reachable['ValueFixture-2'], $root->value);
+    }
+
+    public function testAppendsSelectedCollectionItemsThroughExactNameAdderCalls(): void
+    {
+        $source = new CollectionAdderFixture();
+        $source->name = 'Batch';
+        $source->getProgress()->clear();
+        $source->addProgress(new WritablePropertyFixture('Queued'));
+        $source->addProgress(new WritablePropertyFixture('Running'));
+        $source->addProgress(new WritablePropertyFixture('Filtered'));
+        $context = FixtureGenerationContext::create()->addCollectionItemLimitPerOwner(CollectionAdderFixture::class, 2);
+
+        $yaml = $this->generate($source, $context);
+        $definition = Yaml::parse($yaml)[CollectionAdderFixture::class]['CollectionAdderFixture-1'];
+        self::assertArrayNotHasKey('progress', $definition);
+        self::assertSame([
+            ['addProgress' => ['@WritablePropertyFixture-1']],
+            ['addProgress' => ['@WritablePropertyFixture-2']],
+        ], $definition['__calls']);
+
+        $objects = $this->loadFixtures($yaml);
+        self::assertCount(3, $objects);
+        $batch = $objects['CollectionAdderFixture-1'];
+        self::assertInstanceOf(CollectionAdderFixture::class, $batch);
+        [$default, $queued, $running] = $batch->getProgress()->getValues();
+        self::assertInstanceOf(WritablePropertyFixture::class, $default);
+        self::assertSame('Constructor default', $default->name);
+        self::assertSame($objects['WritablePropertyFixture-1'], $queued);
+        self::assertSame($objects['WritablePropertyFixture-2'], $running);
+    }
+
+    public function testCustomCollectionHandlerCanSkipAnExactNameAdder(): void
+    {
+        $handler = new class() implements ObjectHandlerInterface {
+            public int $visits = 0;
+
+            public function handle(ValueContext $valueContext): bool
+            {
+                if (!$valueContext->getValue() instanceof ArrayCollection) {
+                    return false;
+                }
+
+                $this->visits++;
+                $valueContext->setSkipped(true);
+
+                return true;
+            }
+        };
+        $generator = FixtureGeneratorBuilder::create()
+            ->configureObjectHandlerRegistry(static function (ObjectHandlerRegistryInterface $registry) use ($handler): void {
+                $registry->registerHandlers([$handler]);
+            })
+            ->build()
+        ;
+        $source = new CollectionAdderFixture();
+        $source->name = 'Batch';
+        $source->getProgress()->clear();
+        $source->addProgress(new WritablePropertyFixture('Should be skipped'));
+        $context = FixtureGenerationContext::create()->addCollectionItemSkipCondition(static function (): bool {
+            self::fail('The custom handler must run before built-in collection selection.');
+        });
+
+        $objects = $this->loadFixtures($generator->generate($source, $context));
+
+        self::assertSame(1, $handler->visits);
+        self::assertSame(['CollectionAdderFixture-1'], array_keys($objects));
+        $batch = $objects['CollectionAdderFixture-1'];
+        self::assertInstanceOf(CollectionAdderFixture::class, $batch);
+        self::assertCount(1, $batch->getProgress());
+    }
+
+    public function testSkipsAnAdderRouteWithIncompatibleSelectedItems(): void
+    {
+        $source = new CollectionAdderFixture();
+        $source->name = 'Batch';
+        $source->getProgress()->add(new ValueFixture('Incompatible'));
+
+        $objects = $this->loadFixtures($this->generate($source));
+        self::assertSame(['CollectionAdderFixture-1'], array_keys($objects));
+        $batch = $objects['CollectionAdderFixture-1'];
+        self::assertInstanceOf(CollectionAdderFixture::class, $batch);
+        self::assertCount(1, $batch->getProgress());
     }
 
     public function testExportsSetterCallsWhenConstructorArgumentsAreUnavailable(): void

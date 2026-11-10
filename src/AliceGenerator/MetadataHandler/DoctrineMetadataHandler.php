@@ -45,6 +45,25 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
         }
     }
 
+    /** @internal */
+    public function findOwningFieldForInverseCollection(object $object, string $property): ?string
+    {
+        $metadata = $this->getMetadata($object);
+        if (!$metadata instanceof ORMClassMetadata
+            || !$metadata->isCollectionValuedAssociation($property)
+            || !$metadata->isAssociationInverseSide($property)
+        ) {
+            return null;
+        }
+
+        $owningField = $metadata->getAssociationMappedByTargetField($property);
+        $target = $this->entityManager->getClassMetadata($metadata->getAssociationTargetClass($property));
+
+        return $target->isSingleValuedAssociation($owningField) && !$target->isAssociationInverseSide($owningField)
+            ? $owningField
+            : null;
+    }
+
     public function shouldSkipProperty(ValueContext $valueContext): bool
     {
         $classMetadata = $this->getMetadata($valueContext->getContextObject());

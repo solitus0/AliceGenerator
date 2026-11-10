@@ -32,6 +32,7 @@ final class AliceValueEncoder
     {
         return match (true) {
             $value instanceof AliceExpression => $value->syntax,
+            $value instanceof DeferredStringable => $value->source,
             is_array($value) => array_map(self::unwrapExpressions(...), $value),
             default => $value,
         };

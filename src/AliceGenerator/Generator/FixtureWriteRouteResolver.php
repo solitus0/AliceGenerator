@@ -74,14 +74,20 @@ class FixtureWriteRouteResolver
         bool $arrayItem,
     ): bool {
         $name = $property->getName();
+        $route = $this->resolve($object, $class, $property, $name);
 
-        return $this->acceptsStringableAtRoute(
-            $class,
-            $property,
-            $name,
-            $this->resolve($object, $class, $property, $name),
-            $arrayItem,
-        );
+        if (!$this->acceptsStringableAtRoute($class, $property, $name, $route, $arrayItem)) {
+            return false;
+        }
+
+        if ($route['type'] === 'constructor') {
+            $setter = $this->findSetterMethod($class, $name);
+
+            return $setter === null || $this->setterAcceptsStringable($class, $setter, $arrayItem);
+        }
+
+        return $route['type'] !== 'property'
+            || $this->requiredConstructorAcceptsStringable($class, $name, $arrayItem) !== false;
     }
 
     /**
@@ -101,21 +107,14 @@ class FixtureWriteRouteResolver
 
         $valueType = $arrayItem ? 'array' : 'string';
         if ($route['type'] === 'setter') {
-            return $this->acceptsType($class->getMethod($route['method'])->getParameters()[0]->getType(), $valueType);
+            return $this->setterAcceptsStringable($class, $route['method'], $arrayItem);
         }
 
-        $position = $route['position'] ?? $this->findConstructorParameterPosition($class, $name);
-        $parameter = $position === null ? null : $class->getConstructor()?->getParameters()[$position];
         if ($route['type'] === 'constructor') {
-            $setter = $this->findSetterMethod($class, $name);
-            $setterType = $setter === null ? null : $class->getMethod($setter)->getParameters()[0]->getType();
+            $position = $route['position'] ?? $this->findConstructorParameterPosition($class, $name);
+            $parameter = $position === null ? null : $class->getConstructor()?->getParameters()[$position];
 
-            return $this->acceptsType($parameter?->getType(), $valueType)
-                && $this->acceptsType($setterType, $valueType);
-        }
-
-        if ($parameter !== null && !$parameter->isOptional() && !$this->acceptsType($parameter->getType(), $valueType)) {
-            return false;
+            return $this->acceptsType($parameter?->getType(), $valueType);
         }
 
         return $this->propertyAcceptsType(
@@ -125,6 +124,25 @@ class FixtureWriteRouteResolver
             $valueType,
             $arrayItem,
         );
+    }
+
+    /** @internal */
+    public function setterAcceptsStringable(\ReflectionClass $class, string $setter, bool $arrayItem): bool
+    {
+        $type = $class->getMethod($setter)->getParameters()[0]->getType();
+
+        return $this->acceptsType($type, $arrayItem ? 'array' : 'string');
+    }
+
+    /** @internal */
+    public function requiredConstructorAcceptsStringable(\ReflectionClass $class, string $name, bool $arrayItem): ?bool
+    {
+        $position = $this->findConstructorParameterPosition($class, $name);
+        $parameter = $position === null ? null : $class->getConstructor()?->getParameters()[$position];
+
+        return $parameter === null || $parameter->isOptional()
+            ? null
+            : $this->acceptsType($parameter->getType(), $arrayItem ? 'array' : 'string');
     }
 
     private function getDestinationProperty(
@@ -213,6 +231,48 @@ class FixtureWriteRouteResolver
         }
 
         return $methodName;
+    }
+
+    /**
+     * @internal
+     * @return array{method: string, itemType: string}|null
+     */
+    public function findCollectionAdder(\ReflectionClass $class, string $property): ?array
+    {
+        $suffix = ucfirst($property);
+        $adder = 'add' . $suffix;
+        $itemType = $this->collectionMutatorItemType($class, $adder);
+        if ($itemType === null || $itemType !== $this->collectionMutatorItemType($class, 'remove' . $suffix)) {
+            return null;
+        }
+
+        return ['method' => $adder, 'itemType' => $itemType];
+    }
+
+    private function collectionMutatorItemType(\ReflectionClass $class, string $name): ?string
+    {
+        if (!$class->hasMethod($name)) {
+            return null;
+        }
+
+        $method = $class->getMethod($name);
+        if (!$method->isPublic() || $method->isStatic() || $method->getNumberOfParameters() !== 1) {
+            return null;
+        }
+
+        $parameter = $method->getParameters()[0];
+        $type = $parameter->getType();
+        if ($parameter->isPassedByReference() || $parameter->isVariadic()
+            || !$type instanceof \ReflectionNamedType || $type->isBuiltin()
+        ) {
+            return null;
+        }
+
+        return match ($type->getName()) {
+            'self' => $method->getDeclaringClass()->getName(),
+            'parent' => ($method->getDeclaringClass()->getParentClass() ?: null)?->getName(),
+            default => $type->getName(),
+        };
     }
 
     private function findPropertySetter(\ReflectionClass $reflectionClass, string $propertyName): ?\ReflectionMethod

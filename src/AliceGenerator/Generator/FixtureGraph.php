@@ -9,7 +9,10 @@ use Solitus0\AliceGenerator\MetadataHandler\MetadataHandlerInterface;
 use Solitus0\AliceGenerator\ReferenceNamer\ReferenceNamerInterface;
 use Solitus0\AliceGenerator\Storage\ObjectConstraintsCollection;
 
-/** @internal */
+/**
+ * @internal
+ * @phpstan-type Fixture array{class: string, writes: FinalizedFixtureWrites}
+ */
 final class FixtureGraph
 {
     private readonly ObjectConstraintsCollection $constraints;
@@ -23,11 +26,19 @@ final class FixtureGraph
     /** @var array<array-key, int> Last suffix used for each reserved name. */
     private array $reservedNames = [];
 
-    /** @var array<array-key, array{class: string, definition: array<string, mixed>}> */
+    /** @var array<array-key, Fixture> */
     private array $fixtures = [];
 
     /** @var list<string> */
     private array $discardedReferences = [];
+
+    /** @var array<array-key, true> */
+    private array $inverseOnlyReferences = [];
+
+    /** @var array<array-key, list<array{child: string, owningField: string}>> */
+    private array $inverseAssociations = [];
+
+    private int $inverseDiscoveryDepth = 0;
 
     private int $depth = 0;
 
@@ -40,7 +51,7 @@ final class FixtureGraph
         $this->references = new \SplObjectStorage();
     }
 
-    /** @param callable(object, string): array<string, mixed> $buildDefinition */
+    /** @param callable(object, string): (FinalizedFixtureWrites|null) $buildDefinition */
     public function referenceFor(object $object, callable $buildDefinition): ?string
     {
         if (!$this->constraints->isAllowed($object)) {
@@ -48,7 +59,12 @@ final class FixtureGraph
         }
 
         if ($this->references->offsetExists($object)) {
-            return $this->references[$object];
+            $reference = $this->references[$object];
+            if ($reference !== null && $this->inverseDiscoveryDepth === 0) {
+                unset($this->inverseOnlyReferences[$reference]);
+            }
+
+            return $reference;
         }
 
         if ($this->depth > $this->context->getMaximumRecursion()) {
@@ -62,35 +78,70 @@ final class FixtureGraph
         // Cycles can use the reserved name while the definition is being built.
         $this->references[$object] = $reference;
 
-        $definition = [];
+        $writes = null;
         $this->depth++;
 
         try {
-            $definition = $buildDefinition($object, $class);
+            $writes = $buildDefinition($object, $class);
         } finally {
             $this->depth--;
-            if ($definition === []) {
+            if ($writes === null) {
                 $this->references[$object] = null;
                 $this->discardedReferences[] = $reference;
             }
         }
 
-        if ($definition === []) {
+        if ($writes === null) {
             return null;
         }
 
-        $this->fixtures[$reference] = ['class' => $class, 'definition' => $definition];
+        $this->fixtures[$reference] = ['class' => $class, 'writes' => $writes];
+        if ($this->inverseDiscoveryDepth > 0) {
+            $this->inverseOnlyReferences[$reference] = true;
+        }
 
         return $reference;
+    }
+
+    /** @param \Closure(): mixed $visit */
+    public function discoverInverseCollection(object $owner, string $owningField, \Closure $visit): void
+    {
+        $ownerReference = $this->references[$owner];
+        $this->inverseDiscoveryDepth++;
+
+        try {
+            $items = $visit();
+        } finally {
+            $this->inverseDiscoveryDepth--;
+        }
+
+        if ($ownerReference === null || !is_array($items)) {
+            return;
+        }
+
+        foreach ($items as $item) {
+            if ($item instanceof AliceExpression && str_starts_with($item->syntax, '@')) {
+                $this->inverseAssociations[$ownerReference][] = [
+                    'child' => substr($item->syntax, 1),
+                    'owningField' => $owningField,
+                ];
+            }
+        }
     }
 
     /** @return array<string, array<array-key, array<string, mixed>>> */
     public function getDefinitions(): array
     {
         $fixtures = $this->discardedReferences === [] ? $this->fixtures : $this->pruneDiscardedReferences();
+        if ($this->inverseOnlyReferences !== []) {
+            $fixtures = $this->retainConnectedFixtures($fixtures);
+        }
+
         $definitions = [];
         foreach ($fixtures as $reference => $fixture) {
-            $definitions[$fixture['class']][$reference] = AliceValueEncoder::encodeDefinition($fixture['definition']);
+            $definitions[$fixture['class']][$reference] = AliceValueEncoder::encodeDefinition(
+                $fixture['writes']->definition,
+            );
         }
 
         return $definitions;
@@ -107,20 +158,63 @@ final class FixtureGraph
         return $name;
     }
 
-    /** @return array<array-key, array{class: string, definition: array<string, mixed>}> */
+    /**
+     * @param array<array-key, Fixture> $fixtures
+     * @return array<array-key, Fixture>
+     */
+    private function retainConnectedFixtures(array $fixtures): array
+    {
+        // Fixtures reached without inverse discovery keep their normal export behavior.
+        $pending = array_keys(array_diff_key($fixtures, $this->inverseOnlyReferences));
+        $retained = [];
+        while (($reference = array_pop($pending)) !== null) {
+            if (isset($retained[$reference]) || !isset($fixtures[$reference])) {
+                continue;
+            }
+
+            $retained[$reference] = true;
+            foreach ($this->referencedFixtures($fixtures[$reference]['writes']->definition) as $target) {
+                $pending[] = $target;
+            }
+
+            foreach ($this->inverseAssociations[$reference] ?? [] as ['child' => $child, 'owningField' => $owningField]) {
+                if (($fixtures[$child]['writes'] ?? null)?->writesOwningReference($owningField, $reference)) {
+                    $pending[] = $child;
+                }
+            }
+        }
+
+        return array_intersect_key($fixtures, $retained);
+    }
+
+    /**
+     * @param array<string, mixed> $definition
+     * @return list<string>
+     */
+    private function referencedFixtures(array $definition): array
+    {
+        $references = [];
+        array_walk_recursive($definition, static function (mixed $value) use (&$references): void {
+            // Recognize direct references and property reads supplied by extensions.
+            if ($value instanceof AliceExpression
+                && preg_match('/\A@([^\s<>{}*$]+)(?:->[^\s<>{}()]+)?\z/', $value->syntax, $matches) === 1
+            ) {
+                $references[] = $matches[1];
+            }
+        });
+
+        return $references;
+    }
+
+    /** @return array<array-key, Fixture> */
     private function pruneDiscardedReferences(): array
     {
         $fixtures = $this->fixtures;
         $dependents = [];
         foreach ($fixtures as $reference => $fixture) {
-            array_walk_recursive($fixture['definition'], static function (mixed $value) use (&$dependents, $reference): void {
-                // Recognize direct references and property reads, including expressions supplied by extensions.
-                if ($value instanceof AliceExpression
-                    && preg_match('/\A@([^\s<>{}*$]+)(?:->[^\s<>{}()]+)?\z/', $value->syntax, $matches) === 1
-                ) {
-                    $dependents[$matches[1]][$reference] = true;
-                }
-            });
+            foreach ($this->referencedFixtures($fixture['writes']->definition) as $target) {
+                $dependents[$target][$reference] = true;
+            }
         }
 
         $discarded = $this->discardedReferences;

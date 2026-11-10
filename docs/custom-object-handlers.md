@@ -13,8 +13,8 @@ By default, AliceGenerator registers handlers for:
 - `EnumHandler` for PHP enums
 
 After registered handlers run, AliceGenerator can export an unmapped nested value with `__toString()`
-as literal text. It checks the destination property, constructor argument,
-setter, or collection adder before converting the value. Mapped objects and root objects retain their fixture
+as literal text. The write that will be emitted determines whether the value can be converted, including when a
+setter takes over for an unavailable constructor argument. Mapped objects and root objects retain their fixture
 identity. Register a custom handler for value objects that need a specific reconstruction expression.
 
 ## Implementing a Custom Handler

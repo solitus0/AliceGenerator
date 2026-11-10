@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Solitus0\AliceGenerator;
 
 use Solitus0\AliceGenerator\Generator\AliceValueEncoder;
+use Solitus0\AliceGenerator\Generator\StringableWriteMode;
 use Solitus0\AliceGenerator\Metadata\PropertyMetadata;
 
 class ValueContext
@@ -13,8 +14,11 @@ class ValueContext
 
     private bool $skipped = false;
 
-    /** @var (\Closure(bool): bool)|null */
-    private ?\Closure $stringableWriteCheck = null;
+    /** @var (\Closure(bool): StringableWriteMode)|StringableWriteMode|null */
+    private \Closure|StringableWriteMode|null $stringableWriteMode = null;
+
+    /** @var (\Closure(list<mixed>): void)|null */
+    private ?\Closure $selectedCollectionVisitor = null;
 
     public function __construct(
         private mixed $value = null,
@@ -47,6 +51,32 @@ class ValueContext
         return true;
     }
 
+    /**
+     * @internal
+     * @param \Closure(list<mixed>): void $visitSelected
+     * @param \Closure(): void $visit
+     */
+    public function withSelectedCollectionVisitor(\Closure $visitSelected, \Closure $visit): void
+    {
+        $previousVisitor = $this->selectedCollectionVisitor;
+        $this->selectedCollectionVisitor = $visitSelected;
+
+        try {
+            $visit();
+        } finally {
+            $this->selectedCollectionVisitor = $previousVisitor;
+        }
+    }
+
+    /**
+     * @internal
+     * @return (\Closure(list<mixed>): void)|null
+     */
+    public function getSelectedCollectionVisitor(): ?\Closure
+    {
+        return $this->selectedCollectionVisitor;
+    }
+
     public function getValue(): mixed
     {
         return AliceValueEncoder::unwrapExpressions($this->value);
@@ -65,22 +95,28 @@ class ValueContext
 
     public function allowsStringable(): bool
     {
-        return $this->allowsStringable || ($this->stringableWriteCheck !== null && ($this->stringableWriteCheck)(false));
+        return $this->getStringableWriteMode() === StringableWriteMode::Text;
     }
 
     /** @internal */
-    public function allowsStringableArrayItems(): bool
+    public function getStringableWriteMode(bool $arrayItem = false): StringableWriteMode
     {
-        return $this->allowsStringable || ($this->stringableWriteCheck !== null && ($this->stringableWriteCheck)(true));
+        if ($this->allowsStringable) {
+            return StringableWriteMode::Text;
+        }
+
+        return $this->stringableWriteMode instanceof \Closure
+            ? ($this->stringableWriteMode)($arrayItem)
+            : ($this->stringableWriteMode ?? StringableWriteMode::Reference);
     }
 
     /**
      * @internal
-     * @param \Closure(bool): bool $check
+     * @param (\Closure(bool): StringableWriteMode)|StringableWriteMode $mode
      */
-    public function setStringableWriteCheck(\Closure $check): void
+    public function setStringableWriteMode(\Closure|StringableWriteMode $mode): void
     {
-        $this->stringableWriteCheck = $check;
+        $this->stringableWriteMode = $mode;
     }
 
     /** Store a source value for encoding when the fixture is written. */

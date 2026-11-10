@@ -14,18 +14,25 @@ use Nelmio\Alice\Loader\NativeLoader;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Solitus0\AliceGenerator\Exception\UnknownObjectTypeException;
 use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
+use Solitus0\AliceGenerator\Generator\FixtureGenerator;
 use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
 use Solitus0\AliceGenerator\MetadataHandler\DoctrineMetadataHandler;
+use Solitus0\AliceGenerator\PropertyNamer\PropertyNamerInterface;
 use Solitus0\AliceGenerator\PropertyTransformer\CallbackValueTransformer;
 use Solitus0\AliceGenerator\PropertyTransformer\ClassPropertyMatcher;
 use Solitus0\AliceGenerator\PropertyTransformer\PropertyMatcher;
 use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRule;
 use Solitus0\AliceGenerator\PropertyTransformer\SimpleValueTransformer;
+use Solitus0\AliceGenerator\PropertyTransformer\ValueTransformerInterface;
 use Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\Assignee;
 use Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\Comment;
 use Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\CommentModeration;
+use Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\JobBatch;
+use Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\JobProgress;
 use Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\LocalizedLabel;
 use Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\Project;
+use Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\RenamedBatch;
+use Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\RenamedProgress;
 use Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\Task;
 use Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\TaskStatus;
 use Solitus0\AliceGenerator\Tests\Support\FixtureTestCase;
@@ -104,6 +111,148 @@ final class DoctrineFixtureGenerationTest extends FixtureTestCase
         self::assertNull($project->id);
         self::assertNull($project->summary);
         self::assertSame('', $project->runtimeNote);
+    }
+
+    /** @param list<string> $labels */
+    #[DataProvider('inverseCollectionContexts')]
+    public function testDiscoversChildrenThroughAnUnwritableInverseCollection(
+        FixtureGenerationContext $context,
+        array $labels,
+    ): void {
+        $objects = $this->generateAndLoad($this->loadJobBatch(), $context);
+        $batch = $objects['JobBatch-1'];
+        self::assertInstanceOf(JobBatch::class, $batch);
+        self::assertCount(0, $batch->getProgress());
+
+        $jobs = array_values(array_filter($objects, static fn (object $object): bool => $object instanceof JobProgress));
+        self::assertSame($labels, array_map(static fn (JobProgress $job): string => $job->label, $jobs));
+        foreach ($jobs as $job) {
+            self::assertSame($batch, $job->batch);
+        }
+    }
+
+    public static function inverseCollectionContexts(): iterable
+    {
+        yield 'all children' => [FixtureGenerationContext::create(), ['Queued', 'Running']];
+        yield 'collection limit' => [
+            FixtureGenerationContext::create()->addLimitForOwnerItemCollection(JobBatch::class, JobProgress::class, 1),
+            ['Queued'],
+        ];
+        yield 'collection skipped' => [
+            FixtureGenerationContext::create()->addOwnersWithSkippedCollections(JobBatch::class),
+            [],
+        ];
+        yield 'recursion limit' => [FixtureGenerationContext::create()->setMaximumRecursion(0), []];
+    }
+
+    public function testOnlyRetainsAnInverseChildWithoutItsOwningLinkWhenIndependentlyReached(): void
+    {
+        $batch = $this->loadJobBatch();
+        $independent = $batch->getProgress()->last();
+        self::assertInstanceOf(JobProgress::class, $independent);
+        $context = FixtureGenerationContext::create()->addPropertyTransformRule(new PropertyTransformRule(
+            new ClassPropertyMatcher(JobProgress::class, 'batch'),
+            new SimpleValueTransformer(null),
+        ));
+
+        $objects = $this->generateAndLoad([$batch, $independent], $context);
+        self::assertCount(2, $objects);
+        $job = $objects['JobProgress-2'];
+        self::assertInstanceOf(JobProgress::class, $job);
+        self::assertSame('Running', $job->label);
+        self::assertNull($job->batch);
+    }
+
+    public function testRetainsAnInverseChildWithARenamedOwningConstructorArgument(): void
+    {
+        $generator = $this->createRenamedOwningFieldGenerator();
+        $source = $this->loadRenamedBatch();
+        $objects = $this->loadFixtures($generator->generate($source, FixtureGenerationContext::create()));
+
+        self::assertCount(2, $objects);
+        $batch = $objects['RenamedBatch-1'];
+        $progress = $objects['RenamedProgress-1'];
+        self::assertInstanceOf(RenamedBatch::class, $batch);
+        self::assertInstanceOf(RenamedProgress::class, $progress);
+        self::assertSame($batch, $progress->getBatch());
+        self::assertCount(0, $batch->getProgress());
+    }
+
+    public function testDoesNotRetainAnInverseChildWhenItsOwningConstructorWriteIsDropped(): void
+    {
+        $generator = $this->createRenamedOwningFieldGenerator();
+        $source = $this->loadRenamedBatch();
+        $child = $source->getProgress()->first();
+        self::assertInstanceOf(RenamedProgress::class, $child);
+        $context = FixtureGenerationContext::create()
+            ->allowConstructorBypassFor(RenamedProgress::class)
+            ->addPropertyTransformRule(new PropertyTransformRule(
+                new ClassPropertyMatcher(RenamedProgress::class, 'label'),
+                new class() implements ValueTransformerInterface {
+                    public function transform(ValueContext $valueContext): void
+                    {
+                        $valueContext->setSkipped(true);
+                    }
+                },
+            ))
+        ;
+
+        $objects = $this->loadFixtures($generator->generate($source, $context));
+        self::assertSame(['RenamedBatch-1'], array_keys($objects));
+
+        $objects = $this->loadFixtures($generator->generate([$source, $child], $context));
+        self::assertCount(2, $objects);
+        $progress = $objects['RenamedProgress-1'];
+        self::assertInstanceOf(RenamedProgress::class, $progress);
+        self::assertSame('Running', $progress->getStatus());
+        self::assertNull($progress->getBatch());
+    }
+
+    private function createRenamedOwningFieldGenerator(): FixtureGenerator
+    {
+        return FixtureGeneratorBuilder::create()
+            ->setMetadataHandler(new DoctrineMetadataHandler($this->entityManager))
+            ->setPropertyNamer(new class() implements PropertyNamerInterface {
+                public function createName(ValueContext $valueContext): string
+                {
+                    $field = $valueContext->getPropName();
+
+                    return $valueContext->getContextObjectClass() === RenamedProgress::class && $field === 'batch'
+                        ? 'parent'
+                        : $field;
+                }
+            })
+            ->build()
+        ;
+    }
+
+    private function loadRenamedBatch(): RenamedBatch
+    {
+        $batch = new RenamedBatch('Export jobs');
+        $this->entityManager->persist($batch);
+        $this->entityManager->persist(new RenamedProgress($batch, 'Export', 'Running'));
+        $this->entityManager->flush();
+        $this->entityManager->clear();
+
+        $reloaded = $this->entityManager->find(RenamedBatch::class, $batch->id);
+        self::assertInstanceOf(RenamedBatch::class, $reloaded);
+
+        return $reloaded;
+    }
+
+    private function loadJobBatch(): JobBatch
+    {
+        $batch = new JobBatch('Export jobs');
+        $this->entityManager->persist($batch);
+        $this->entityManager->persist(new JobProgress('Queued', $batch));
+        $this->entityManager->persist(new JobProgress('Running', $batch));
+        $this->entityManager->flush();
+        $this->entityManager->clear();
+
+        $reloaded = $this->entityManager->find(JobBatch::class, $batch->id);
+        self::assertInstanceOf(JobBatch::class, $reloaded);
+
+        return $reloaded;
     }
 
     #[DataProvider('metadataOptions')]

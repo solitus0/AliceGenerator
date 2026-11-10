@@ -106,6 +106,11 @@ class ValueVisitor
 
     public function visitUnknownType(ValueContext $valueContext): void
     {
+        $this->visitValue($valueContext, preserveEmptyArrays: false);
+    }
+
+    private function visitValue(ValueContext $valueContext, bool $preserveEmptyArrays): void
+    {
         $propertyMetadata = $valueContext->getMetadata();
         if ($propertyMetadata) {
             $valueTransformer = $this->transformRulesCollection->getPropertyTransformer($propertyMetadata);
@@ -115,7 +120,11 @@ class ValueVisitor
         }
 
         if (is_array($valueContext->getValue())) {
-            $this->visitArray($valueContext);
+            if ($preserveEmptyArrays) {
+                $this->visitArrayValue($valueContext, preserveEmptyArrays: true);
+            } else {
+                $this->visitArray($valueContext);
+            }
         } elseif (is_object($valueContext->getValue())) {
             $this->visitObject($valueContext);
         }
@@ -123,13 +132,23 @@ class ValueVisitor
 
     public function visitArray(ValueContext $valueContext): void
     {
+        $this->visitArrayValue($valueContext, preserveEmptyArrays: false);
+    }
+
+    private function visitArrayValue(ValueContext $valueContext, bool $preserveEmptyArrays): void
+    {
         $array = $valueContext->getValue();
+        $keepEmpty = $preserveEmptyArrays && $array === [];
         $allowsStringable = $valueContext->allowsStringable()
             || $this->acceptsStringable($valueContext, arrayItem: true);
 
         foreach ($array as $key => &$item) {
             $itemValueContext = new ValueContext($item, valueVisitor: $this, allowsStringable: $allowsStringable);
-            $this->visitUnknownType($itemValueContext);
+            if ($preserveEmptyArrays && is_array($item)) {
+                $this->visitArrayValue($itemValueContext, preserveEmptyArrays: true);
+            } else {
+                $this->visitUnknownType($itemValueContext);
+            }
 
             if ($itemValueContext->isSkipped()) {
                 unset($array[$key]);
@@ -138,7 +157,7 @@ class ValueVisitor
             }
         }
 
-        if (count($array) === 0) {
+        if ($array === [] && !$keepEmpty) {
             $valueContext->setSkipped(true);
         } else {
             $valueContext->setValue($array);
@@ -245,13 +264,11 @@ class ValueVisitor
             return false;
         }
 
-        $properties = [];
-        $constructorCandidates = [];
-        $setterCandidates = [];
         $prunedGraphValue = false;
         $this->recursionDepth++;
 
         $reflectionClass = new \ReflectionClass($class);
+        $writePlan = $this->fixtureWriteRouteResolver->createPlan($object, $reflectionClass, $this->generationContext);
         $newObject = $reflectionClass->newInstanceWithoutConstructor();
         $propertyMetadatas = $this->classMetadataProvider->getPropertyMetadata($reflectionClass);
 
@@ -259,7 +276,8 @@ class ValueVisitor
             $reflectionProperty = new \ReflectionProperty($propertyMetadata->class, $propertyMetadata->name);
             $reflectionProperty->setAccessible(true);
 
-            $value = $reflectionProperty->isInitialized($object) ? $reflectionProperty->getValue($object) : null;
+            $isInitialized = $reflectionProperty->isInitialized($object);
+            $value = $isInitialized ? $reflectionProperty->getValue($object) : null;
             $valueContext = new ValueContext($value, $class, $object, $propertyMetadata, $this);
 
             if ($this->handler->shouldSkipProperty($valueContext)) {
@@ -268,16 +286,23 @@ class ValueVisitor
 
             $this->metadataResolver->resolve($valueContext);
 
+            $constructorOnly = false;
             if (!$valueContext->isModified() && !$valueContext->isSkipped()) {
                 $initialValue = $reflectionProperty->isInitialized($newObject) ?
                     $reflectionProperty->getValue($newObject) : null;
 
                 $value = $valueContext->getValue();
                 if ($value === $initialValue) {
-                    continue;
+                    if (!$isInitialized || !$writePlan->canSupplyDefaultValue($reflectionProperty->getName())) {
+                        continue;
+                    }
+
+                    $constructorOnly = true;
+                    $this->visitValue($valueContext, preserveEmptyArrays: true);
+                } else {
+                    $this->visitUnknownType($valueContext);
                 }
 
-                $this->visitUnknownType($valueContext);
                 if ($valueContext->isSkipped() && (is_object($value) || is_array($value))) {
                     $prunedGraphValue = true;
                 }
@@ -292,92 +317,12 @@ class ValueVisitor
                 throw new InvalidPropertyNameException('Property name must be a non empty string.');
             }
 
-            $writeRoute = $this->fixtureWriteRouteResolver->resolve($object, $reflectionClass, $reflectionProperty, $propName);
-            $normalizedValue = $valueContext->getValue();
-
-            if ($writeRoute['type'] === 'property') {
-                $properties[$propName] = $normalizedValue;
-
-                continue;
-            }
-
-            if ($writeRoute['type'] === 'constructor') {
-                $constructorCandidates[] = [
-                    'position' => $writeRoute['position'],
-                    'property' => $propName,
-                    'value' => $normalizedValue,
-                ];
-
-                continue;
-            }
-
-            if ($writeRoute['type'] === 'setter') {
-                $setterCandidates[] = [
-                    'method' => $writeRoute['method'],
-                    'property' => $propName,
-                    'value' => $normalizedValue,
-                ];
-
-                continue;
-            }
-
-            if (!$this->generationContext->shouldSkipNonWritableProperties()) {
-                $properties[$propName] = $normalizedValue;
-            }
+            $writePlan->addProperty($reflectionProperty, $propName, $valueContext, $constructorOnly);
         }
 
         $this->recursionDepth--;
 
-        $saveValues = [];
-
-        $constructorArguments = $this->fixtureWriteRouteResolver->buildConstructorArguments(
-            $reflectionClass,
-            $constructorCandidates,
-            $properties,
-        );
-        if ($constructorArguments !== null) {
-            $saveValues['__construct'] = $constructorArguments;
-        } else {
-            foreach ($constructorCandidates as $candidate) {
-                $setterMethod = $this->fixtureWriteRouteResolver->findSetterMethod(
-                    $reflectionClass,
-                    $candidate['property']
-                );
-                if ($setterMethod !== null) {
-                    $setterCandidates[] = [
-                        'method' => $setterMethod,
-                        'property' => $candidate['property'],
-                        'value' => $candidate['value'],
-                    ];
-
-                    continue;
-                }
-
-                if (!$this->generationContext->shouldSkipNonWritableProperties()) {
-                    $properties[$candidate['property']] = $candidate['value'];
-                }
-            }
-
-            if ($reflectionClass->getConstructor()?->getNumberOfRequiredParameters() > 0) {
-                if ($setterCandidates !== [] && $this->generationContext->allowsConstructorBypassFor($class)) {
-                    $saveValues['__construct'] = false;
-                } elseif ($prunedGraphValue) {
-                    return false;
-                }
-            }
-        }
-
-        foreach ($properties as $property => $value) {
-            $saveValues[$property] = $value;
-        }
-
-        if ($setterCandidates !== []) {
-            $saveValues['__calls'] = array_map(
-                static fn (array $candidate): array => [$candidate['method'] => [$candidate['value']]],
-                $setterCandidates
-            );
-        }
-
+        $saveValues = $writePlan->buildDefinition($class, $prunedGraphValue);
         if ($saveValues === []) {
             return false;
         }

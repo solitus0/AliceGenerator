@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Solitus0\AliceGenerator\Tests\Generator\Fixtures;
 
-final class InvalidConstructorRoutingFixture
+final class RequiredNullableConstructorFixture
 {
     private ?string $first = null;
 
@@ -21,5 +21,10 @@ final class InvalidConstructorRoutingFixture
     public function debugState(): array
     {
         return [$this->first, $this->second];
+    }
+
+    public function unsetFirst(): void
+    {
+        unset($this->first);
     }
 }

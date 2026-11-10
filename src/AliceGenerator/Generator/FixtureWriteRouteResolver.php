@@ -20,6 +20,15 @@ class FixtureWriteRouteResolver
         $this->propertyAccessor = PropertyAccess::createPropertyAccessor();
     }
 
+    /** @internal */
+    public function createPlan(
+        object $object,
+        \ReflectionClass $reflectionClass,
+        FixtureGenerationContext $generationContext,
+    ): FixtureWritePlan {
+        return new FixtureWritePlan($object, $reflectionClass, $generationContext, $this);
+    }
+
     /**
      * @return array{type: 'property'|'constructor'|'setter'|'skip', position?: int, method?: string}
      */

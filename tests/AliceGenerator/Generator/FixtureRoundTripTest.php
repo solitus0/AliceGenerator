@@ -18,9 +18,10 @@ use Solitus0\AliceGenerator\ReferenceNamer\CallbackNamer;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorDefaultsFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorOnlyFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorSetterFallbackFixture;
-use Solitus0\AliceGenerator\Tests\Generator\Fixtures\InvalidConstructorRoutingFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\MixedRoutingFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\Priority;
+use Solitus0\AliceGenerator\Tests\Generator\Fixtures\RequiredDefaultArrayFixture;
+use Solitus0\AliceGenerator\Tests\Generator\Fixtures\RequiredNullableConstructorFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\RequiredRelationFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\RouteLikeFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\SetterOnlyFixture;
@@ -311,9 +312,36 @@ final class FixtureRoundTripTest extends FixtureTestCase
         self::assertSame('published', $fixture->getStatus());
     }
 
+    public function testRestoresAnInitializedNullRequiredByTheConstructor(): void
+    {
+        $source = new RequiredNullableConstructorFixture(null, 'second');
+        $objects = $this->loadFixtures($this->generate($source));
+        $fixture = $objects['RequiredNullableConstructorFixture-1'];
+
+        self::assertInstanceOf(RequiredNullableConstructorFixture::class, $fixture);
+        self::assertSame([null, 'second'], $fixture->debugState());
+    }
+
+    public function testUsesADefaultValuedArrayForTheConstructorOnly(): void
+    {
+        $source = new RequiredDefaultArrayFixture(['@literal', []]);
+        $yaml = $this->generate($source);
+        $objects = $this->loadFixtures($yaml);
+        $fixture = $objects['RequiredDefaultArrayFixture-1'];
+
+        self::assertInstanceOf(RequiredDefaultArrayFixture::class, $fixture);
+        self::assertSame($source->items, $fixture->items);
+        self::assertArrayNotHasKey(
+            'items',
+            Yaml::parse($yaml)[RequiredDefaultArrayFixture::class]['RequiredDefaultArrayFixture-1']
+        );
+    }
+
     public function testSkipsAnUnwritableValueWhenConstructorArgumentsAreUnavailable(): void
     {
-        $objects = $this->loadFixtures($this->generate(new InvalidConstructorRoutingFixture(null, 'second')));
+        $source = new RequiredNullableConstructorFixture(null, 'second');
+        $source->unsetFirst();
+        $objects = $this->loadFixtures($this->generate($source));
 
         self::assertSame([], $objects);
     }
@@ -321,11 +349,13 @@ final class FixtureRoundTripTest extends FixtureTestCase
     public function testExportsRawPropertiesWhenRequested(): void
     {
         $context = FixtureGenerationContext::create()->setSkipNonWritableProperties(false);
-        $yaml = $this->generate(new InvalidConstructorRoutingFixture(null, 'second'), $context);
+        $source = new RequiredNullableConstructorFixture(null, 'second');
+        $source->unsetFirst();
+        $yaml = $this->generate($source, $context);
 
         self::assertSame(
             ['second' => 'second'],
-            Yaml::parse($yaml)[InvalidConstructorRoutingFixture::class]['InvalidConstructorRoutingFixture-1']
+            Yaml::parse($yaml)[RequiredNullableConstructorFixture::class]['RequiredNullableConstructorFixture-1']
         );
     }
 

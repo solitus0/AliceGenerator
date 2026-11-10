@@ -54,6 +54,7 @@ final class FixtureGraph
     /** @param callable(object, string): (FinalizedFixtureWrites|null) $buildDefinition */
     public function referenceFor(object $object, callable $buildDefinition): ?string
     {
+        $alias = $this->context->getGenerationPolicy()->aliasFor($object);
         if (!$this->constraints->isAllowed($object)) {
             return null;
         }
@@ -74,7 +75,7 @@ final class FixtureGraph
         $class = $this->metadataHandler->getClass($object);
         $index = ($this->indicesByClass[$class] ?? 0) + 1;
         $this->indicesByClass[$class] = $index;
-        $reference = $this->reserveName($this->referenceNamer->createReference($object, $index));
+        $reference = $this->reserveName($alias ?? $this->referenceNamer->createReference($object, $index));
         // Cycles can use the reserved name while the definition is being built.
         $this->references[$object] = $reference;
 
@@ -136,6 +137,8 @@ final class FixtureGraph
         if ($this->inverseOnlyReferences !== []) {
             $fixtures = $this->retainConnectedFixtures($fixtures);
         }
+
+        $this->context->getGenerationPolicy()->checkWrites($fixtures);
 
         $definitions = [];
         foreach ($fixtures as $reference => $fixture) {

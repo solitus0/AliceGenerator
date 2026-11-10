@@ -335,17 +335,15 @@ class ValueVisitor
         $writePlan = $this->fixtureWriteRouteResolver->createPlan($object, $reflectionClass, $this->graph->context);
         $newObject = $reflectionClass->newInstanceWithoutConstructor();
         $hasRequiredConstructorArguments = $writePlan->hasRequiredConstructorArguments();
+        $policy = $this->getGenerationContext()->getGenerationPolicy();
+        $selectedValues = $policy->selectedValuesFor($object);
         $visitProperty = $this->visitValue(...);
         $visitUnwritableCollection = $this->visitUnwritableCollection(...);
 
         foreach ($this->classMetadataProvider->getPropertyMetadata($reflectionClass) as $metadata) {
-            $property = $this->prepareProperty(
-                $object,
-                $class,
-                $newObject,
-                $metadata,
-                $hasRequiredConstructorArguments,
-            );
+            $property = $selectedValues === null
+                ? $this->prepareProperty($object, $class, $newObject, $metadata, $hasRequiredConstructorArguments)
+                : $policy->prepareSelectedProperty($selectedValues, $metadata, $object, $class, $this);
             if ($property !== null) {
                 $writePlan->addProperty($property, $visitProperty, $visitUnwritableCollection);
             }
@@ -363,6 +361,7 @@ class ValueVisitor
     ): ?PreparedProperty {
         $reflection = new \ReflectionProperty($metadata->class, $metadata->name);
         $reflection->setAccessible(true);
+
         $isInitialized = $reflection->isInitialized($object);
         $value = $isInitialized ? $reflection->getValue($object) : null;
         $context = new ValueContext($value, $class, $object, $metadata, $this);
@@ -406,6 +405,7 @@ class ValueVisitor
             $constructorOnly,
             $needsTraversal,
             is_object($graphSource) || is_array($graphSource),
+            preserveEmptyArrays: $constructorOnly,
         );
     }
 }

@@ -12,6 +12,8 @@ use Solitus0\AliceGenerator\Storage\ObjectConstraintsCollection;
 
 class FixtureGenerationContext
 {
+    private FixtureGenerationPolicy $generationPolicy;
+
     private readonly ObjectConstraintsCollection $constraintsCollection;
 
     private readonly PropertyTransformRulesCollection $transformRulesCollection;
@@ -56,6 +58,7 @@ class FixtureGenerationContext
 
     public function __construct()
     {
+        $this->generationPolicy = new FixtureGenerationPolicy();
         $this->constraintsCollection = new ObjectConstraintsCollection(new NonSpecificMetadataHandler());
         $this->transformRulesCollection = new PropertyTransformRulesCollection();
     }
@@ -63,6 +66,20 @@ class FixtureGenerationContext
     public static function create(): self
     {
         return new self();
+    }
+
+    /** @internal */
+    public function setGenerationPolicy(FixtureGenerationPolicy $policy): self
+    {
+        $this->generationPolicy = $policy;
+
+        return $this;
+    }
+
+    /** @internal */
+    public function getGenerationPolicy(): FixtureGenerationPolicy
+    {
+        return $this->generationPolicy;
     }
 
     public function getMaximumRecursion(): int

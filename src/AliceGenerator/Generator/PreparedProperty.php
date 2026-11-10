@@ -16,6 +16,7 @@ final class PreparedProperty
         public readonly bool $constructorOnly,
         public readonly bool $needsTraversal,
         public readonly bool $sourceIsGraphValue,
+        public readonly bool $preserveEmptyArrays,
     ) {
     }
 }

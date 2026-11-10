@@ -95,7 +95,7 @@ final class FixtureWritePlan
                 $constructorOnly,
                 $arrayItem,
             ));
-            $visit($valueContext, $constructorOnly);
+            $visit($valueContext, $property->preserveEmptyArrays);
             if ($valueContext->isSkipped()) {
                 $this->prunedGraphValue = $this->prunedGraphValue || $property->sourceIsGraphValue;
 
@@ -206,6 +206,11 @@ final class FixtureWritePlan
             }
         }
 
+        $policy = $this->generationContext->getGenerationPolicy();
+        if ($constructorArguments === null && $this->hasRequiredConstructorArguments()) {
+            $policy->missingRequiredConstructor();
+        }
+
         if ($constructorArguments !== null) {
             $definition['__construct'] = $constructorArguments;
             if (!array_key_exists('__construct', $properties)) {
@@ -279,7 +284,7 @@ final class FixtureWritePlan
             }
         }
 
-        return $definition === [] ? null : new FinalizedFixtureWrites($definition, $owningReferences);
+        return $policy->finalizeWrites($definition, $owningReferences);
     }
 
     /**

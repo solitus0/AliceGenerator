@@ -18,6 +18,7 @@ Detailed guides are available:
 - [Configuration](./docs/configuration.md)
 - [Custom Object Handlers](./docs/custom-object-handlers.md)
 - [Property Transformers](./docs/property-transformers.md)
+- [Recipe-based fixture export](./docs/fixture-export.md)
 - [Changelog](./CHANGELOG.md)
 
 ## Features

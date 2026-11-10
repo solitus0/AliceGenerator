@@ -15,6 +15,6 @@ class SimpleValueTransformer implements ValueTransformerInterface
 
     public function transform(ValueContext $valueContext): void
     {
-        $valueContext->setValue($this->newValue);
+        $valueContext->setSourceValue($this->newValue);
     }
 }

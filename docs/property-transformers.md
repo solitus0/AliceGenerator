@@ -41,6 +41,11 @@ Available implementations:
 - `SimpleValueTransformer` — replaces value with a static one
 - `CallbackValueTransformer` — derives a value from the current `ValueContext`
 
+Both built-in transformers treat strings as literal data. Callbacks read source strings without Alice escaping through
+`ValueContext::getValue()`. To emit Alice syntax intentionally, pass or return an
+`AliceExpression` from the `Solitus0\AliceGenerator` namespace. Use `AliceExpression::reference('user-1')` for a fixture
+reference or `new AliceExpression('<(1 + 2)>')` for an expression.
+
 ---
 
 ## ✅ Basic Usage Example
@@ -92,10 +97,12 @@ class RandomIntTransformer implements ValueTransformerInterface
 {
     public function transform(ValueContext $valueContext): void
     {
-        $valueContext->setValue(random_int(1, 100));
+        $valueContext->setSourceValue(random_int(1, 100));
     }
 }
 ```
+
+Use `setSourceValue()` for literal data. Custom transformers can use `setValue()` to supply fixture-ready Alice syntax.
 
 ---
 

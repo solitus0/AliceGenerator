@@ -68,3 +68,4 @@ $generator = FixtureGeneratorBuilder::create()
 
 - Returning `true` from `handle()` stops further processing and accepts the transformed value.
 - Returning `false` allows the next registered handler to attempt processing.
+- Use `setSourceValue()` for literal data and `setValue()` for fixture-ready Alice syntax.

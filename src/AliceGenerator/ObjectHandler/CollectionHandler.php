@@ -67,7 +67,7 @@ class CollectionHandler implements ObjectHandlerInterface
             $items[] = $item;
         }
 
-        $valueContext->setValue($items);
+        $valueContext->setSourceValue($items);
         $visitor->visitArray($valueContext);
 
         return true;

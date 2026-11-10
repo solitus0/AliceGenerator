@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Built-in property transformers now emit literal strings by default. Wrap deliberate Alice syntax in
+  `AliceExpression`. Transformer callbacks now receive unescaped source strings from `ValueContext::getValue()`.
+- Generated fixture expressions for enums now reference cases by name.
+
 ## [v0.1.5] – 2026-04-21
 
 ### Added

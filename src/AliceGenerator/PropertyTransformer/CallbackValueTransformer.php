@@ -21,6 +21,6 @@ class CallbackValueTransformer implements ValueTransformerInterface
     public function transform(ValueContext $valueContext): void
     {
         $newValue = call_user_func($this->callback, $valueContext);
-        $valueContext->setValue($newValue);
+        $valueContext->setSourceValue($newValue);
     }
 }

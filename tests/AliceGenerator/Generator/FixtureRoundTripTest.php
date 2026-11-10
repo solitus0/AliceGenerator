@@ -6,15 +6,18 @@ namespace Solitus0\AliceGenerator\Tests\Generator;
 
 use Doctrine\Common\Collections\ArrayCollection;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Solitus0\AliceGenerator\AliceExpression;
 use Solitus0\AliceGenerator\Exception\InvalidArgumentException;
 use Solitus0\AliceGenerator\Exception\InvalidPropertyNameException;
 use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
 use Solitus0\AliceGenerator\Generator\FixtureGenerator;
 use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
 use Solitus0\AliceGenerator\Generator\PhpGenerator;
+use Solitus0\AliceGenerator\Generator\YamlGenerator;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerInterface;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistryInterface;
 use Solitus0\AliceGenerator\PropertyNamer\PropertyNamerInterface;
+use Solitus0\AliceGenerator\PropertyTransformer\CallbackValueTransformer;
 use Solitus0\AliceGenerator\PropertyTransformer\ClassPropertyMatcher;
 use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRule;
 use Solitus0\AliceGenerator\PropertyTransformer\SimpleValueTransformer;
@@ -22,6 +25,7 @@ use Solitus0\AliceGenerator\ReferenceNamer\CallbackNamer;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorDefaultsFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorOnlyFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorSetterFallbackFixture;
+use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ExpressionLikeEnum;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\MixedRoutingFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\Priority;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\RequiredDefaultArrayFixture;
@@ -62,6 +66,10 @@ final class FixtureRoundTripTest extends FixtureTestCase
         yield 'email address' => ['support@example.org'];
         yield 'literal HTML' => ['<p title="Example">Alice &amp; Bob</p>'];
         yield 'multiline HTML' => ["<p>First line\r\nSecond line\nThird line</p>"];
+        yield 'Alice expression' => ['<(1 + 2)>'];
+        yield 'Alice list' => ['[first, second]'];
+        yield 'Alice dynamic array' => ['2x item'];
+        yield 'Alice optional value' => ['100%? item'];
     }
 
     #[DataProvider('dates')]
@@ -94,6 +102,49 @@ final class FixtureRoundTripTest extends FixtureTestCase
 
         self::assertInstanceOf(ValueFixture::class, $fixture);
         self::assertSame([Visibility::Internal, Priority::High], $fixture->value);
+    }
+
+    #[DataProvider('fixtureFormats')]
+    public function testSeparatesTransformerValuesFromExplicitAliceExpressions(string $format): void
+    {
+        $generator = FixtureGeneratorBuilder::create()
+            ->setGenerator($format === 'php' ? new PhpGenerator() : new YamlGenerator(3, 4))
+            ->build()
+        ;
+        $context = FixtureGenerationContext::create()
+            ->addPropertyTransformRule(new PropertyTransformRule(
+                new ClassPropertyMatcher(WritablePropertyFixture::class, 'name'),
+                new SimpleValueTransformer('@missing_fixture'),
+            ))
+            ->addPropertyTransformRule(new PropertyTransformRule(
+                new ClassPropertyMatcher(ValueFixture::class, 'value'),
+                new CallbackValueTransformer(static fn (ValueContext $value): array => [
+                    $value->getValue(),
+                    '<(1 + 2)>',
+                    new AliceExpression('<(1 + 2)>'),
+                    ExpressionLikeEnum::Quoted,
+                ]),
+            ))
+        ;
+
+        $fixtures = $generator->generate([
+            new WritablePropertyFixture('original'),
+            new ValueFixture('@original'),
+        ], $context);
+        $objects = $this->loadFixtures($fixtures, $format);
+        $literal = $objects['WritablePropertyFixture-1'];
+        $mixed = $objects['ValueFixture-1'];
+
+        self::assertInstanceOf(WritablePropertyFixture::class, $literal);
+        self::assertInstanceOf(ValueFixture::class, $mixed);
+        self::assertSame('@missing_fixture', $literal->name);
+        self::assertSame(['@original', '<(1 + 2)>', 3, ExpressionLikeEnum::Quoted], $mixed->value);
+    }
+
+    public static function fixtureFormats(): iterable
+    {
+        yield 'YAML' => ['yaml'];
+        yield 'PHP' => ['php'];
     }
 
     public function testExportsStringableValuesAsLiteralText(): void
@@ -251,7 +302,7 @@ final class FixtureRoundTripTest extends FixtureTestCase
 
     public function testPrunesAnExplicitReferenceAndKeepsLiteralTextWithTheSameValue(): void
     {
-        $reference = '@UnwritableStateFixture-1';
+        $reference = AliceExpression::reference('UnwritableStateFixture-1');
         $context = FixtureGenerationContext::create()->addPropertyTransformRule(new PropertyTransformRule(
             new ClassPropertyMatcher(ValueFixture::class, 'value'),
             new SimpleValueTransformer($reference),
@@ -260,12 +311,12 @@ final class FixtureRoundTripTest extends FixtureTestCase
         $objects = $this->loadFixtures($this->generate([
             new UnwritableStateFixture(),
             new ValueFixture('replace this'),
-            new WritablePropertyFixture($reference),
+            new WritablePropertyFixture($reference->syntax),
         ], $context));
 
         self::assertSame(['WritablePropertyFixture-1'], array_keys($objects));
         self::assertInstanceOf(WritablePropertyFixture::class, $objects['WritablePropertyFixture-1']);
-        self::assertSame($reference, $objects['WritablePropertyFixture-1']->name);
+        self::assertSame($reference->syntax, $objects['WritablePropertyFixture-1']->name);
     }
 
     public function testExportsObjectsFromARootDoctrineCollection(): void
@@ -315,11 +366,15 @@ final class FixtureRoundTripTest extends FixtureTestCase
     public function testFillsAnOmittedOptionalConstructorArgument(): void
     {
         $source = new ConstructorDefaultsFixture('first', last: 'last');
-        $objects = $this->loadFixtures($this->generate($source));
+        $context = FixtureGenerationContext::create()->addPropertyTransformRule(new PropertyTransformRule(
+            new ClassPropertyMatcher(ConstructorDefaultsFixture::class, 'middle'),
+            new SimpleValueTransformer('unexpected replacement'),
+        ));
+        $objects = $this->loadFixtures($this->generate($source, $context));
         $fixture = $objects['ConstructorDefaultsFixture-1'];
 
         self::assertInstanceOf(ConstructorDefaultsFixture::class, $fixture);
-        self::assertSame(['first', 'fallback', 'last'], $fixture->debugState());
+        self::assertSame(['first', '@fallback', 'last'], $fixture->debugState());
     }
 
     public function testRestoresRequiredWritableConstructorArgumentsAndSetterState(): void
@@ -469,7 +524,10 @@ final class FixtureRoundTripTest extends FixtureTestCase
                             return false;
                         }
 
-                        $valueContext->setValue('Handled ' . (string) $valueContext->getValue());
+                        $valueContext->setValue(sprintf(
+                            '<(strtoupper(%s))>',
+                            var_export((string) $valueContext->getValue(), true),
+                        ));
 
                         return true;
                     }
@@ -488,7 +546,7 @@ final class FixtureRoundTripTest extends FixtureTestCase
         $fixture = $objects['ValueFixture-1'];
 
         self::assertInstanceOf(ValueFixture::class, $fixture);
-        self::assertSame('Handled Alice', $fixture->value);
+        self::assertSame('ALICE', $fixture->value);
     }
 
     public function testReusesGeneratorAfterRejectingAnInvalidPropertyName(): void

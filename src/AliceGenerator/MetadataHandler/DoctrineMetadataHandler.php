@@ -95,11 +95,12 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
         $mapped = $isMappedField || $isMappedAssoc || $isEmbedded;
 
         // 3) Optionally skip empty strings for nullable scalar fields
+        $value = $valueContext->getUnencodedValue();
         if (
             $this->skipEmptyStrings
             && $isMappedField
-            && is_string($valueContext->getValue())
-            && trim($valueContext->getValue()) === ''
+            && is_string($value)
+            && trim($value) === ''
         ) {
             $fieldMapping = $classMetadata->getFieldMapping($propName);
             $nullable = $fieldMapping['nullable'] ?? false;

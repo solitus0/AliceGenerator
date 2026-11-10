@@ -99,13 +99,14 @@ class ValueVisitor
             }
         }
 
-        if (is_array($valueContext->getValue())) {
+        $value = $valueContext->getUnencodedValue();
+        if (is_array($value)) {
             if ($preserveEmptyArrays) {
                 $this->visitArrayValue($valueContext, preserveEmptyArrays: true);
             } else {
                 $this->visitArray($valueContext);
             }
-        } elseif (is_object($valueContext->getValue())) {
+        } elseif (is_object($value) && !$value instanceof AliceExpression) {
             $this->visitObject($valueContext);
         }
     }
@@ -117,12 +118,13 @@ class ValueVisitor
 
     private function visitArrayValue(ValueContext $valueContext, bool $preserveEmptyArrays): void
     {
-        $array = $valueContext->getValue();
+        $array = $valueContext->getUnencodedValue();
         $keepEmpty = $preserveEmptyArrays && $array === [];
         $allowsStringable = $valueContext->allowsStringable()
             || $this->acceptsStringable($valueContext, arrayItem: true);
 
-        foreach ($array as $key => &$item) {
+        $items = [];
+        foreach ($array as $key => $item) {
             $itemValueContext = new ValueContext($item, valueVisitor: $this, allowsStringable: $allowsStringable);
             if ($preserveEmptyArrays && is_array($item)) {
                 $this->visitArrayValue($itemValueContext, preserveEmptyArrays: true);
@@ -130,17 +132,15 @@ class ValueVisitor
                 $this->visitUnknownType($itemValueContext);
             }
 
-            if ($itemValueContext->isSkipped()) {
-                unset($array[$key]);
-            } else {
-                $array[$key] = $itemValueContext->getValue();
+            if (!$itemValueContext->isSkipped()) {
+                $items[$key] = $itemValueContext->getFixtureValue();
             }
         }
 
-        if ($array === [] && !$keepEmpty) {
+        if ($items === [] && !$keepEmpty) {
             $valueContext->setSkipped(true);
         } else {
-            $valueContext->setValue($array);
+            $valueContext->setSourceValue($items);
         }
     }
 
@@ -167,7 +167,7 @@ class ValueVisitor
             if ($reference === null) {
                 $valueContext->setSkipped(true);
             } else {
-                $valueContext->setValue('@' . $reference);
+                $valueContext->setSourceValue(AliceExpression::reference($reference));
             }
 
             return;
@@ -237,7 +237,7 @@ class ValueVisitor
                 $initialValue = $reflectionProperty->isInitialized($newObject) ?
                     $reflectionProperty->getValue($newObject) : null;
 
-                $value = $valueContext->getValue();
+                $value = $valueContext->getUnencodedValue();
                 if ($value === $initialValue) {
                     if (!$isInitialized || !$writePlan->canSupplyDefaultValue($reflectionProperty->getName())) {
                         continue;

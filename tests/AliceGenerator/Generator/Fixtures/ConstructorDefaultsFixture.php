@@ -8,13 +8,13 @@ final class ConstructorDefaultsFixture
 {
     private readonly string $first;
 
-    private string $middle = 'fallback';
+    private string $middle = '@fallback';
 
     private readonly string $last;
 
     public function __construct(
         string $first,
-        string $middle = 'fallback',
+        string $middle = '@fallback',
         string $last = 'tail'
     ) {
         $this->first = $first;

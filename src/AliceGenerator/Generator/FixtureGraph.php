@@ -58,7 +58,7 @@ final class FixtureGraph
         $this->depth++;
 
         try {
-            $definition = $buildDefinition($object, $class);
+            $definition = AliceValueEncoder::encodeDefinition($buildDefinition($object, $class));
         } finally {
             $this->depth--;
             if ($definition === []) {

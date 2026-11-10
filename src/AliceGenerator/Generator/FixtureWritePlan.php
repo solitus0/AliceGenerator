@@ -47,7 +47,7 @@ final class FixtureWritePlan
         bool $constructorOnly,
     ): void {
         $route = $this->resolver->resolve($this->object, $this->reflectionClass, $reflectionProperty, $propertyName);
-        $value = $valueContext->getValue();
+        $value = $valueContext->getFixtureValue();
 
         if ($constructorOnly) {
             if ($route['type'] === 'property' || $route['type'] === 'constructor') {

@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace Solitus0\AliceGenerator;
 
+use Solitus0\AliceGenerator\Generator\AliceValueEncoder;
 use Solitus0\AliceGenerator\Metadata\PropertyMetadata;
 
 class ValueContext
 {
     private bool $modified = false;
+
+    private bool $fixtureSyntax = false;
 
     private bool $skipped = false;
 
@@ -29,12 +32,24 @@ class ValueContext
 
     public function getValue(): mixed
     {
-        return !$this->modified && is_string($this->value) ? $this->escapeLiteralString($this->value) : $this->value;
+        return AliceValueEncoder::unwrapExpressions($this->value);
+    }
+
+    /** @internal */
+    public function getUnencodedValue(): mixed
+    {
+        return $this->value;
+    }
+
+    /** @internal */
+    public function getFixtureValue(): mixed
+    {
+        return $this->fixtureSyntax ? AliceValueEncoder::markSyntax($this->value) : $this->value;
     }
 
     public function setLiteralString(string $value): void
     {
-        $this->setValue($this->escapeLiteralString($value));
+        $this->setSourceValue($value);
     }
 
     public function allowsStringable(): bool
@@ -42,31 +57,24 @@ class ValueContext
         return $this->allowsStringable;
     }
 
-    private function escapeLiteralString(string $value): string
+    /** Store a source value for encoding when the fixture is written. */
+    public function setSourceValue(mixed $value): static
     {
-        $containsMarkup = $value !== strip_tags($value);
+        $this->value = $value;
+        $this->modified = true;
+        $this->fixtureSyntax = false;
 
-        // Alice consumes escape markers and splits function arguments at literal newlines.
-        if (str_contains($value, '\@') || str_contains($value, '\$') || ($containsMarkup && strpbrk($value, "\r\n") !== false)) {
-            return "<base64_decode('" . base64_encode($value) . "')>";
-        }
-
-        if ($containsMarkup) {
-            $encoded = htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-
-            return "<htmlspecialchars_decode('$encoded', 3)>";
-        }
-
-        // Escape literal markers Alice could interpret as fixture or variable references.
-        return str_replace(['@', '$'], ['\@', '\$'], $value);
+        return $this;
     }
 
+    /** Store a fixture value that may already contain Alice syntax. */
     public function setValue(mixed $value, bool $setModified = true): static
     {
         $this->value = $value;
         if ($setModified) {
             $this->modified = true;
         }
+        $this->fixtureSyntax = $this->modified;
 
         return $this;
     }

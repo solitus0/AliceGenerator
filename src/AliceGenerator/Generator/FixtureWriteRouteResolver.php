@@ -9,6 +9,11 @@ use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
 use Symfony\Component\PropertyInfo\Extractor\ReflectionExtractor;
 use Symfony\Component\PropertyInfo\PropertyWriteInfo;
 
+/**
+ * @phpstan-type ConstructorValue array{source: string|null, value: mixed}
+ * @phpstan-type PlannedConstructorValue array{position: int, property: string, source: string, value: mixed}
+ * @phpstan-type ConstructorArgument array{parameter: string|null, source: string|null, value: mixed}
+ */
 class FixtureWriteRouteResolver
 {
     private PropertyAccessorInterface $propertyAccessor;
@@ -304,14 +309,78 @@ class FixtureWriteRouteResolver
         array $constructorCandidates,
         array $writableProperties = [],
     ): ?array {
-        $constructor = $reflectionClass->getConstructor();
-        if ($constructor === null) {
+        $candidatesByPosition = [];
+        foreach ($constructorCandidates as $candidate) {
+            $candidatesByPosition[$candidate['position']] = ['source' => null, 'value' => $candidate['value']];
+        }
+
+        $arguments = $this->assembleConstructorArguments(
+            $reflectionClass,
+            $candidatesByPosition,
+            array_map(static fn (mixed $value): array => ['source' => null, 'value' => $value], $writableProperties),
+        );
+
+        return $arguments === null ? null : array_column($arguments, 'value');
+    }
+
+    /**
+     * @internal
+     * @param array<int, PlannedConstructorValue> $constructorCandidates
+     * @param array<string, ConstructorValue> $writableProperties
+     * @return array<int, ConstructorArgument>|null
+     */
+    public function bindConstructorArguments(
+        \ReflectionClass $reflectionClass,
+        array $constructorCandidates,
+        array $writableProperties,
+    ): ?array {
+        $candidatesByPosition = array_column($constructorCandidates, null, 'position');
+        if ($this::class === self::class) {
+            return $this->assembleConstructorArguments($reflectionClass, $candidatesByPosition, $writableProperties);
+        }
+
+        // Custom resolvers can override the public argument builder.
+        $arguments = $this->buildConstructorArguments(
+            $reflectionClass,
+            array_map(static fn (array $candidate): array => [
+                'position' => $candidate['position'],
+                'property' => $candidate['property'],
+                'value' => $candidate['value'],
+            ], $constructorCandidates),
+            array_map(static fn (array $write): mixed => $write['value'], $writableProperties),
+        );
+        if ($arguments === null) {
             return null;
         }
 
-        $candidatesByPosition = [];
-        foreach ($constructorCandidates as $candidate) {
-            $candidatesByPosition[$candidate['position']] = $candidate['value'];
+        $parameters = $reflectionClass->getConstructor()?->getParameters() ?? [];
+        $bindings = [];
+        foreach ($arguments as $position => $value) {
+            $parameter = $parameters[$position] ?? null;
+            $write = $parameter === null ? null : $this->constructorWrite($parameter, $candidatesByPosition, $writableProperties);
+            $bindings[$position] = [
+                'parameter' => $parameter?->getName(),
+                'source' => $write !== null && $write['value'] === $value ? $write['source'] : null,
+                'value' => $value,
+            ];
+        }
+
+        return $bindings;
+    }
+
+    /**
+     * @param array<int, ConstructorValue> $candidatesByPosition
+     * @param array<string, ConstructorValue> $writableProperties
+     * @return list<ConstructorArgument>|null
+     */
+    private function assembleConstructorArguments(
+        \ReflectionClass $reflectionClass,
+        array $candidatesByPosition,
+        array $writableProperties,
+    ): ?array {
+        $constructor = $reflectionClass->getConstructor();
+        if ($constructor === null) {
+            return null;
         }
 
         $highestPosition = max([$constructor->getNumberOfRequiredParameters() - 1, ...array_keys($candidatesByPosition)]);
@@ -326,28 +395,29 @@ class FixtureWriteRouteResolver
                 break;
             }
 
-            if (array_key_exists($position, $candidatesByPosition)) {
-                $arguments[] = $candidatesByPosition[$position];
-
-                continue;
+            $write = $this->constructorWrite($parameter, $candidatesByPosition, $writableProperties);
+            if ($write === null) {
+                if (!$parameter->isDefaultValueAvailable()) {
+                    return null;
+                }
+                $write = ['source' => null, 'value' => $parameter->getDefaultValue()];
             }
 
-            if (!$parameter->isOptional() && array_key_exists($parameter->getName(), $writableProperties)) {
-                $arguments[] = $writableProperties[$parameter->getName()];
-
-                continue;
-            }
-
-            if ($parameter->isDefaultValueAvailable()) {
-                $arguments[] = $parameter->getDefaultValue();
-
-                continue;
-            }
-
-            return null;
+            $arguments[] = ['parameter' => $parameter->getName(), 'source' => $write['source'], 'value' => $write['value']];
         }
 
         return $arguments;
+    }
+
+    /**
+     * @param array<int, ConstructorValue> $candidatesByPosition
+     * @param array<string, ConstructorValue> $writableProperties
+     * @return ConstructorValue|null
+     */
+    private function constructorWrite(\ReflectionParameter $parameter, array $candidatesByPosition, array $writableProperties): ?array
+    {
+        return $candidatesByPosition[$parameter->getPosition()]
+            ?? ($parameter->isOptional() ? null : ($writableProperties[$parameter->getName()] ?? null));
     }
 
     private function findConstructorParameterPosition(\ReflectionClass $reflectionClass, string $propertyName): ?int

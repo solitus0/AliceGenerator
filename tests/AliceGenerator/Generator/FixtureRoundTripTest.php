@@ -12,12 +12,16 @@ use Solitus0\AliceGenerator\Exception\InvalidPropertyNameException;
 use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
 use Solitus0\AliceGenerator\Generator\FixtureGenerator;
 use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
+use Solitus0\AliceGenerator\Generator\FixtureWriteRouteResolver;
 use Solitus0\AliceGenerator\Generator\PhpGenerator;
 use Solitus0\AliceGenerator\Generator\YamlGenerator;
+use Solitus0\AliceGenerator\Metadata\Provider\ReflectionClassMetadataProvider;
 use Solitus0\AliceGenerator\MetadataHandler\MetadataHandlerInterface;
 use Solitus0\AliceGenerator\MetadataHandler\NonSpecificMetadataHandler;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerInterface;
+use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistry;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistryInterface;
+use Solitus0\AliceGenerator\PropertyNamer\PropertyNamer;
 use Solitus0\AliceGenerator\PropertyNamer\PropertyNamerInterface;
 use Solitus0\AliceGenerator\PropertyTransformer\CallbackValueTransformer;
 use Solitus0\AliceGenerator\PropertyTransformer\ClassPropertyMatcher;
@@ -25,6 +29,7 @@ use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRule;
 use Solitus0\AliceGenerator\PropertyTransformer\SimpleValueTransformer;
 use Solitus0\AliceGenerator\PropertyTransformer\ValueTransformerInterface;
 use Solitus0\AliceGenerator\ReferenceNamer\CallbackNamer;
+use Solitus0\AliceGenerator\ReferenceNamer\ClassNamer;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\CollectionAdderFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorDefaultsFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorObjectWithTextSetterFixture;
@@ -824,6 +829,39 @@ final class FixtureRoundTripTest extends FixtureTestCase
 
         self::assertInstanceOf(ConstructorOnlyFixture::class, $fixture);
         self::assertSame(['token-1'], $fixture->debugState());
+    }
+
+    public function testHonorsCustomConstructorArguments(): void
+    {
+        $resolver = new class() extends FixtureWriteRouteResolver {
+            public function buildConstructorArguments(
+                \ReflectionClass $reflectionClass,
+                array $constructorCandidates,
+                array $writableProperties = [],
+            ): ?array {
+                $arguments = parent::buildConstructorArguments($reflectionClass, $constructorCandidates, $writableProperties);
+
+                return $arguments === null ? null : ['custom token'];
+            }
+        };
+        $visitor = new ValueVisitor(
+            new ReflectionClassMetadataProvider(),
+            new NonSpecificMetadataHandler(),
+            null,
+            new ObjectHandlerRegistry(),
+            new PropertyNamer(),
+            new ClassNamer(),
+            $resolver,
+        );
+        $generator = new FixtureGenerator($visitor, new YamlGenerator(3, 4));
+        $objects = $this->loadFixtures($generator->generate(
+            new ConstructorOnlyFixture('original token'),
+            FixtureGenerationContext::create(),
+        ));
+        $fixture = $objects['ConstructorOnlyFixture-1'];
+
+        self::assertInstanceOf(ConstructorOnlyFixture::class, $fixture);
+        self::assertSame(['custom token'], $fixture->debugState());
     }
 
     public function testRestoresPrivateConstructorStateWhenSettersAlsoExist(): void

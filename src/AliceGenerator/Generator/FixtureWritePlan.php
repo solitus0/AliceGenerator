@@ -10,8 +10,9 @@ use Solitus0\AliceGenerator\ValueContext;
 
 /**
  * @internal
+ * @phpstan-import-type ConstructorArgument from FixtureWriteRouteResolver
  * @phpstan-type PropertyWrite array{source: string, value: mixed}
- * @phpstan-type ConstructorCandidate array{position: int, property: string, source: string, value: mixed}
+ * @phpstan-type ConstructorCandidate array{position: int, property: string, fallbackSetter: string|null, source: string, value: mixed}
  */
 final class FixtureWritePlan
 {
@@ -86,11 +87,15 @@ final class FixtureWritePlan
             return;
         }
 
+        $fallbackSetter = $route['type'] === 'constructor' && !$constructorOnly
+            ? $this->resolver->findSetterMethod($this->reflectionClass, $propertyName)
+            : null;
         if ($property->needsTraversal) {
             $valueContext->setStringableWriteMode(fn (bool $arrayItem): StringableWriteMode => $this->stringableMode(
                 $reflectionProperty,
                 $propertyName,
                 $route,
+                $fallbackSetter,
                 $constructorOnly,
                 $arrayItem,
             ));
@@ -122,6 +127,7 @@ final class FixtureWritePlan
                 $this->constructorCandidates[] = [
                     'position' => $route['position'],
                     'property' => $propertyName,
+                    'fallbackSetter' => $fallbackSetter,
                 ] + $write;
 
                 break;
@@ -137,6 +143,7 @@ final class FixtureWritePlan
         \ReflectionProperty $property,
         string $name,
         array $route,
+        ?string $fallbackSetter,
         bool $constructorOnly,
         bool $arrayItem,
     ): StringableWriteMode {
@@ -149,11 +156,8 @@ final class FixtureWritePlan
 
         $primaryText = $this->resolver->acceptsStringableAtRoute($class, $property, $name, $route, $arrayItem);
         $fallbackText = $primaryText;
-        if ($route['type'] === 'constructor') {
-            $setter = $this->resolver->findSetterMethod($class, $name);
-            if ($setter !== null) {
-                $fallbackText = $this->resolver->setterAcceptsStringable($class, $setter, $arrayItem);
-            }
+        if ($fallbackSetter !== null) {
+            $fallbackText = $this->resolver->setterAcceptsStringable($class, $fallbackSetter, $arrayItem);
         } elseif ($route['type'] === 'property' && $primaryText) {
             // A required argument can reuse a writable property's value.
             $primaryText = $this->resolver->requiredConstructorAcceptsStringable($class, $name, $arrayItem) !== false;
@@ -192,14 +196,11 @@ final class FixtureWritePlan
         }
 
         if ($constructorArguments !== null) {
-            $definition['__construct'] = $constructorArguments;
+            $definition['__construct'] = array_map(static fn (array $argument): mixed => $argument['value'], $constructorArguments);
             if (!array_key_exists('__construct', $properties)) {
-                $this->recordConstructorReferences(
-                    $owningReferences,
-                    $constructorArguments,
-                    $constructorCandidates,
-                    $properties + $this->defaultConstructorValues,
-                );
+                foreach ($constructorArguments as ['parameter' => $parameter, 'source' => $source, 'value' => $value]) {
+                    $this->recordReference($owningReferences, $value, $parameter, $source);
+                }
             }
         } else {
             if ($this->hasDeferredStringables) {
@@ -207,7 +208,7 @@ final class FixtureWritePlan
             }
             foreach ($this->constructorCandidates as $candidate) {
                 $property = $candidate['property'];
-                $setterMethod = $this->resolver->findSetterMethod($this->reflectionClass, $property);
+                $setterMethod = $candidate['fallbackSetter'];
                 if ($setterMethod === null && $this->generationContext->shouldSkipNonWritableProperties()) {
                     continue;
                 }
@@ -270,19 +271,22 @@ final class FixtureWritePlan
     /**
      * @param array<int, ConstructorCandidate> $candidates
      * @param array<string, PropertyWrite> $properties
-     * @return array<int, mixed>|null
+     * @return array<int, ConstructorArgument>|null
      */
     private function buildConstructorArguments(array $candidates, array $properties): ?array
     {
-        return $this->resolver->buildConstructorArguments(
+        $probeWrite = fn (array $write): array => [
+            'source' => $write['source'],
+            'value' => $this->constructorProbeValue($write['value']),
+        ];
+
+        return $this->resolver->bindConstructorArguments(
             $this->reflectionClass,
             array_map(fn (array $candidate): array => [
                 'position' => $candidate['position'],
                 'property' => $candidate['property'],
-                'value' => $this->constructorProbeValue($candidate['value']),
-            ], $candidates),
-            array_map(fn (array $write): mixed => $this->constructorProbeValue($write['value']), $properties)
-                + array_map(static fn (array $write): mixed => $write['value'], $this->defaultConstructorValues),
+            ] + $probeWrite($candidate), $candidates),
+            array_map($probeWrite, $properties) + $this->defaultConstructorValues,
         );
     }
 
@@ -360,28 +364,6 @@ final class FixtureWritePlan
         $skipped = $value === [];
 
         return $value;
-    }
-
-    /**
-     * @param array<string, array<array-key, true>> $references
-     * @param array<int, mixed> $arguments
-     * @param array<int, ConstructorCandidate> $constructorCandidates
-     * @param array<string, PropertyWrite> $writableProperties
-     */
-    private function recordConstructorReferences(
-        array &$references,
-        array $arguments,
-        array $constructorCandidates,
-        array $writableProperties,
-    ): void {
-        $candidates = array_column($constructorCandidates, null, 'position');
-        foreach ($this->reflectionClass->getConstructor()?->getParameters() ?? [] as $position => $parameter) {
-            $name = $parameter->getName();
-            $value = $arguments[$position] ?? null;
-            $write = $candidates[$position] ?? ($parameter->isOptional() ? null : ($writableProperties[$name] ?? null));
-            $source = $write !== null && $write['value'] === $value ? $write['source'] : null;
-            $this->recordReference($references, $value, $name, $source);
-        }
     }
 
     /** @param array<string, array<array-key, true>> $references */

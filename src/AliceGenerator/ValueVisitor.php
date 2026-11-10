@@ -12,7 +12,9 @@ use Solitus0\AliceGenerator\Generator\FixtureWriteRouteResolver;
 use Solitus0\AliceGenerator\Metadata\Provider\ClassMetadataProviderInterface;
 use Solitus0\AliceGenerator\Metadata\Resolver\MetadataResolverInterface;
 use Solitus0\AliceGenerator\MetadataHandler\MetadataHandlerInterface;
+use Solitus0\AliceGenerator\MetadataHandler\NonSpecificMetadataHandler;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistryInterface;
+use Solitus0\AliceGenerator\PropertyNamer\PropertyNamer;
 use Solitus0\AliceGenerator\PropertyNamer\PropertyNamerInterface;
 use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRulesCollection;
 use Solitus0\AliceGenerator\PropertyTransformer\ValueTransformerInterface;
@@ -122,9 +124,12 @@ class ValueVisitor
     public function visitArray(ValueContext $valueContext): void
     {
         $array = $valueContext->getValue();
+        $allowsStringable = $valueContext->allowsStringable()
+            || $this->acceptsStringable($valueContext, arrayItem: true);
 
         foreach ($array as $key => &$item) {
-            $itemValueContext = $this->visitSimpleValue($item);
+            $itemValueContext = new ValueContext($item, valueVisitor: $this, allowsStringable: $allowsStringable);
+            $this->visitUnknownType($itemValueContext);
 
             if ($itemValueContext->isSkipped()) {
                 unset($array[$key]);
@@ -145,8 +150,20 @@ class ValueVisitor
         $object = $valueContext->getValue();
 
         $objectHandled = $this->objectHandlerRegistry->runHandlers($valueContext);
+        $hasMetadata = !$objectHandled && $this->handler->canHandle($object);
 
-        if (!$objectHandled && $this->handler->canHandle($object)) {
+        if (
+            !$objectHandled
+            && $object instanceof \Stringable
+            && (!$hasMetadata || $this->handler::class === NonSpecificMetadataHandler::class)
+            && ($valueContext->allowsStringable() || $this->acceptsStringable($valueContext))
+        ) {
+            $valueContext->setLiteralString((string) $object);
+
+            return;
+        }
+
+        if ($hasMetadata) {
             if (!$this->generationContext->getConstraintsCollection()->isAllowed($object)) {
                 $valueContext->setSkipped(true);
 
@@ -199,6 +216,23 @@ class ValueVisitor
                 )
             );
         }
+    }
+
+    private function acceptsStringable(ValueContext $valueContext, bool $arrayItem = false): bool
+    {
+        $owner = $valueContext->getContextObject();
+        $class = $valueContext->getContextObjectClass();
+        $metadata = $valueContext->getMetadata();
+        if ($owner === null || $class === null || $metadata === null || $this->propertyNamer::class !== PropertyNamer::class) {
+            return false;
+        }
+
+        return $this->fixtureWriteRouteResolver->acceptsStringable(
+            $owner,
+            new \ReflectionClass($class),
+            new \ReflectionProperty($metadata->class, $metadata->name),
+            $arrayItem,
+        );
     }
 
     private function handlePersistedObject(object $object, string $reference): bool

@@ -16,8 +16,8 @@ class Project
     #[ORM\Column]
     public ?int $id = null;
 
-    #[ORM\Column(nullable: true)]
-    public ?string $summary = null;
+    #[ORM\Column(type: 'string', nullable: true)]
+    public string|\Stringable|null $summary = null;
 
     public string $runtimeNote = '';
 

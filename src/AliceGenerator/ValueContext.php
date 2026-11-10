@@ -17,7 +17,8 @@ class ValueContext
         private readonly ?string $contextObjectClass = null,
         private readonly ?object $contextObject = null,
         private readonly ?PropertyMetadata $propertyMetadata = null,
-        private readonly ?ValueVisitor $valueVisitor = null
+        private readonly ?ValueVisitor $valueVisitor = null,
+        private readonly bool $allowsStringable = false,
     ) {
     }
 
@@ -28,26 +29,36 @@ class ValueContext
 
     public function getValue(): mixed
     {
-        if (!$this->modified && is_string($this->value)) {
-            $s = $this->value;
-            $containsMarkup = $s !== strip_tags($s);
+        return !$this->modified && is_string($this->value) ? $this->escapeLiteralString($this->value) : $this->value;
+    }
 
-            // Alice consumes escape markers and splits function arguments at literal newlines.
-            if (str_contains($s, '\@') || str_contains($s, '\$') || ($containsMarkup && strpbrk($s, "\r\n") !== false)) {
-                return "<base64_decode('" . base64_encode($s) . "')>";
-            }
+    public function setLiteralString(string $value): void
+    {
+        $this->setValue($this->escapeLiteralString($value));
+    }
 
-            if ($containsMarkup) {
-                $s = htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    public function allowsStringable(): bool
+    {
+        return $this->allowsStringable;
+    }
 
-                return "<htmlspecialchars_decode('$s', 3)>";
-            }
+    private function escapeLiteralString(string $value): string
+    {
+        $containsMarkup = $value !== strip_tags($value);
 
-            // Escape literal markers Alice could interpret as fixture or variable references.
-            return str_replace(['@', '$'], ['\@', '\$'], $s);
+        // Alice consumes escape markers and splits function arguments at literal newlines.
+        if (str_contains($value, '\@') || str_contains($value, '\$') || ($containsMarkup && strpbrk($value, "\r\n") !== false)) {
+            return "<base64_decode('" . base64_encode($value) . "')>";
         }
 
-        return $this->value;
+        if ($containsMarkup) {
+            $encoded = htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+
+            return "<htmlspecialchars_decode('$encoded', 3)>";
+        }
+
+        // Escape literal markers Alice could interpret as fixture or variable references.
+        return str_replace(['@', '$'], ['\@', '\$'], $value);
     }
 
     public function setValue(mixed $value, bool $setModified = true): static

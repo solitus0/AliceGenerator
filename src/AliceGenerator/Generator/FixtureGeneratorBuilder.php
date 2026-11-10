@@ -45,7 +45,6 @@ class FixtureGeneratorBuilder
             new ObjectHandler\CollectionHandler(),
             new ObjectHandler\DateTimeHandler(),
             new ObjectHandler\DateTimeImmutableHandler(),
-            new ObjectHandler\RamseyUuidHandler(),
             new ObjectHandler\EnumHandler(),
         ]);
 

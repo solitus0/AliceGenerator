@@ -28,8 +28,8 @@ class Task
         public string $title = '',
         #[ORM\ManyToOne(inversedBy: 'tasks')]
         public ?Project $project = null,
-        #[ORM\ManyToOne]
-        public ?Assignee $assignee = null,
+        #[ORM\ManyToOne(targetEntity: Assignee::class)]
+        public Assignee|string|null $assignee = null,
         #[ORM\Column(enumType: TaskStatus::class)]
         public TaskStatus $status = TaskStatus::Published,
     ) {

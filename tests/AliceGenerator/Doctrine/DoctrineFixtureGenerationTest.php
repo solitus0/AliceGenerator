@@ -89,7 +89,7 @@ final class DoctrineFixtureGenerationTest extends FixtureTestCase
         self::assertSame('Implement export', $implement->title);
         self::assertSame('Review', $review->title);
         self::assertSame($project, $design->project);
-        self::assertNotNull($design->assignee);
+        self::assertInstanceOf(Assignee::class, $design->assignee);
         self::assertSame('Alex', $design->assignee->name);
         self::assertNull($design->assignee->id);
         self::assertSame($design->assignee, $implement->assignee);
@@ -124,6 +124,20 @@ final class DoctrineFixtureGenerationTest extends FixtureTestCase
     {
         yield 'keep generated identifiers only' => [false, true];
         yield 'keep empty strings only' => [true, false];
+    }
+
+    public function testExportsAnUnmappedStringableValueInsideADoctrineEntity(): void
+    {
+        $this->project->summary = new class() implements \Stringable {
+            public function __toString(): string
+            {
+                return '@support';
+            }
+        };
+        $context = FixtureGenerationContext::create()->setMaximumRecursion(0);
+        $objects = $this->generateAndLoad($this->project, $context);
+
+        self::assertSame('@support', $this->onlyProject($objects)->summary);
     }
 
     public function testRestoresCompositeIdentifierAndEmbeddedText(): void

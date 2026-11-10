@@ -25,6 +25,8 @@ use Solitus0\AliceGenerator\Tests\Generator\Fixtures\RequiredRelationFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\RouteLikeFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\SetterOnlyFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\StaticSetterFixture;
+use Solitus0\AliceGenerator\Tests\Generator\Fixtures\StringableText;
+use Solitus0\AliceGenerator\Tests\Generator\Fixtures\StringableWriteRoutesFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\UnwritableStateFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ValueFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\Visibility;
@@ -87,6 +89,56 @@ final class FixtureRoundTripTest extends FixtureTestCase
 
         self::assertInstanceOf(ValueFixture::class, $fixture);
         self::assertSame([Visibility::Internal, Priority::High], $fixture->value);
+    }
+
+    public function testExportsStringableValuesAsLiteralText(): void
+    {
+        $source = new ValueFixture(new StringableText('@helpdesk'));
+        $objects = $this->loadFixtures($this->generate($source));
+        $fixture = $objects['ValueFixture-1'];
+
+        self::assertInstanceOf(ValueFixture::class, $fixture);
+        self::assertSame('@helpdesk', $fixture->value);
+        self::assertCount(1, $objects);
+    }
+
+    public function testExportsStringableItemsInAPlainArray(): void
+    {
+        $source = new ValueFixture([new StringableText('first'), [new StringableText('\$second')]]);
+        $objects = $this->loadFixtures($this->generate($source));
+        $fixture = $objects['ValueFixture-1'];
+
+        self::assertInstanceOf(ValueFixture::class, $fixture);
+        self::assertSame(['first', ['\$second']], $fixture->value);
+        self::assertCount(1, $objects);
+    }
+
+    public function testUsesTextOnlyForWriteRoutesThatAcceptIt(): void
+    {
+        $requiredObject = new StringableText('required object');
+        $source = new StringableWriteRoutesFixture(new StringableText('constructor text'), $requiredObject);
+        $source->typedProperty = $requiredObject;
+        $source->setSetterValue(new StringableText('setter text'));
+        $source->addLabel($requiredObject);
+        $objects = $this->loadFixtures($this->generate($source));
+        $fixture = $objects['StringableWriteRoutesFixture-1'];
+
+        self::assertInstanceOf(StringableWriteRoutesFixture::class, $fixture);
+        self::assertSame('constructor text', $fixture->getConstructorValue());
+        self::assertSame('setter text', $fixture->getSetterValue());
+        self::assertInstanceOf(StringableText::class, $fixture->requiredObject);
+        self::assertSame('required object', $fixture->requiredObject->text);
+        self::assertSame($fixture->requiredObject, $fixture->typedProperty);
+        self::assertSame([$fixture->requiredObject], $fixture->getLabels());
+    }
+
+    public function testExportsAStringableRootAsAnObject(): void
+    {
+        $objects = $this->loadFixtures($this->generate(new StringableText('root state')));
+        $fixture = $objects['StringableText-1'];
+
+        self::assertInstanceOf(StringableText::class, $fixture);
+        self::assertSame('root state', $fixture->text);
     }
 
     public function testSharedReferencesStillResolveAfterSkippingAnEmptyObject(): void
@@ -303,7 +355,7 @@ final class FixtureRoundTripTest extends FixtureTestCase
                             return false;
                         }
 
-                        $valueContext->setValue((string) $valueContext->getValue());
+                        $valueContext->setValue('Handled ' . (string) $valueContext->getValue());
 
                         return true;
                     }
@@ -322,7 +374,7 @@ final class FixtureRoundTripTest extends FixtureTestCase
         $fixture = $objects['ValueFixture-1'];
 
         self::assertInstanceOf(ValueFixture::class, $fixture);
-        self::assertSame('Alice', $fixture->value);
+        self::assertSame('Handled Alice', $fixture->value);
     }
 
     public function testReusesGeneratorAfterRejectingAnInvalidPropertyName(): void

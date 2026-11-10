@@ -17,6 +17,7 @@ use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
 use Solitus0\AliceGenerator\Generator\FixtureGenerator;
 use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
 use Solitus0\AliceGenerator\MetadataHandler\DoctrineMetadataHandler;
+use Solitus0\AliceGenerator\MetadataHandler\NonSpecificMetadataHandler;
 use Solitus0\AliceGenerator\PropertyNamer\PropertyNamerInterface;
 use Solitus0\AliceGenerator\PropertyTransformer\CallbackValueTransformer;
 use Solitus0\AliceGenerator\PropertyTransformer\ClassPropertyMatcher;
@@ -143,6 +144,28 @@ final class DoctrineFixtureGenerationTest extends FixtureTestCase
             [],
         ];
         yield 'recursion limit' => [FixtureGenerationContext::create()->setMaximumRecursion(0), []];
+    }
+
+    public function testDiscoversInverseChildrenUsingTheConfiguredMetadataPolicy(): void
+    {
+        $handler = new class() extends NonSpecificMetadataHandler {
+            public function findOwningFieldForInverseCollection(object $object, string $property): ?string
+            {
+                return $object instanceof JobBatch && $property === 'progress' ? 'batch' : null;
+            }
+        };
+        $source = new JobBatch('Export jobs');
+        $source->getProgress()->add(new JobProgress('Queued', $source));
+        $generator = FixtureGeneratorBuilder::create()->setMetadataHandler($handler)->build();
+        $objects = $this->loadFixtures($generator->generate($source, FixtureGenerationContext::create()));
+
+        self::assertCount(2, $objects);
+        $batch = $objects['JobBatch-1'];
+        $job = $objects['JobProgress-1'];
+        self::assertInstanceOf(JobBatch::class, $batch);
+        self::assertInstanceOf(JobProgress::class, $job);
+        self::assertSame($batch, $job->batch);
+        self::assertCount(0, $batch->getProgress());
     }
 
     public function testOnlyRetainsAnInverseChildWithoutItsOwningLinkWhenIndependentlyReached(): void
@@ -287,6 +310,18 @@ final class DoctrineFixtureGenerationTest extends FixtureTestCase
         $objects = $this->generateAndLoad($this->project, $context);
 
         self::assertSame('@support', $this->onlyProject($objects)->summary);
+    }
+
+    public function testPreservesAMappedStringableObjectInsideADoctrineEntity(): void
+    {
+        $this->project->summary = new Assignee('Mapped @support');
+        $context = FixtureGenerationContext::create()->addOwnersWithSkippedCollections(Project::class);
+        $objects = $this->generateAndLoad($this->project, $context);
+        $assignee = $objects['Assignee-1'];
+
+        self::assertInstanceOf(Assignee::class, $assignee);
+        self::assertSame('Mapped @support', $assignee->name);
+        self::assertSame($assignee, $this->onlyProject($objects)->summary);
     }
 
     public function testRestoresCompositeIdentifierAndEmbeddedText(): void

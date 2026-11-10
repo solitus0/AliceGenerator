@@ -13,12 +13,15 @@ use Solitus0\AliceGenerator\Generator\FinalizedFixtureWrites;
 use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
 use Solitus0\AliceGenerator\Generator\FixtureGraph;
 use Solitus0\AliceGenerator\Generator\FixtureWriteRouteResolver;
+use Solitus0\AliceGenerator\Generator\PreparedProperty;
 use Solitus0\AliceGenerator\Generator\StringableWriteMode;
+use Solitus0\AliceGenerator\Metadata\PropertyMetadata;
 use Solitus0\AliceGenerator\Metadata\Provider\ClassMetadataProviderInterface;
+use Solitus0\AliceGenerator\Metadata\Resolver\MetadataResolver;
 use Solitus0\AliceGenerator\Metadata\Resolver\MetadataResolverInterface;
-use Solitus0\AliceGenerator\MetadataHandler\DoctrineMetadataHandler;
+use Solitus0\AliceGenerator\MetadataHandler\MetadataExportPolicyInterface;
 use Solitus0\AliceGenerator\MetadataHandler\MetadataHandlerInterface;
-use Solitus0\AliceGenerator\MetadataHandler\NonSpecificMetadataHandler;
+use Solitus0\AliceGenerator\MetadataHandler\ObjectExportMode;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistryInterface;
 use Solitus0\AliceGenerator\PropertyNamer\PropertyNamerInterface;
 use Solitus0\AliceGenerator\PropertyTransformer\ValueTransformerInterface;
@@ -28,12 +31,12 @@ class ValueVisitor
 {
     private FixtureGraph $graph;
 
-    private bool $collectingFixtures = false;
+    private array $completedResults = [];
 
     public function __construct(
         private readonly ClassMetadataProviderInterface $classMetadataProvider,
         private readonly MetadataHandlerInterface $handler,
-        private readonly MetadataResolverInterface $metadataResolver,
+        private readonly ?MetadataResolverInterface $metadataResolver,
         private readonly ObjectHandlerRegistryInterface $objectHandlerRegistry,
         private readonly PropertyNamerInterface $propertyNamer,
         private readonly ReferenceNamerInterface $referenceNamer,
@@ -48,34 +51,54 @@ class ValueVisitor
 
     public function setup(FixtureGenerationContext $generationContext): void
     {
+        $this->completedResults = [];
         $this->graph = new FixtureGraph($generationContext, $this->handler, $this->referenceNamer);
     }
 
     /** @internal */
     public function collectFixtures(mixed $value, FixtureGenerationContext $generationContext): array
     {
-        if ($this->collectingFixtures) {
-            $visitor = clone $this;
-            $visitor->collectingFixtures = false;
+        return $this->completedResults = $this->collectRunFixtures($value, $generationContext);
+    }
 
-            return $visitor->collectFixtures($value, $generationContext);
-        }
-
-        $this->collectingFixtures = true;
+    /** @internal */
+    public function collectRunFixtures(mixed $value, FixtureGenerationContext $generationContext): array
+    {
+        $traversal = $this->createTraversal();
 
         try {
-            $this->setup($generationContext);
-            $this->visitSimpleValue($value);
+            $traversal->setup($generationContext);
+            $traversal->visitSimpleValue($value);
+            $traversal->completedResults = $traversal->getResults();
 
-            return $this->getResults();
+            return $traversal->completedResults;
         } finally {
-            $this->collectingFixtures = false;
+            // Extension callbacks can retain the run's visitor for access to its results.
+            unset($traversal->graph);
         }
+    }
+
+    private function createTraversal(): self
+    {
+        if ($this::class !== self::class) {
+            // Preserve custom visitor hooks and their constructor configuration.
+            return clone $this;
+        }
+
+        return new self(
+            $this->classMetadataProvider,
+            $this->handler,
+            $this->metadataResolver,
+            $this->objectHandlerRegistry,
+            $this->propertyNamer,
+            $this->referenceNamer,
+            $this->fixtureWriteRouteResolver,
+        );
     }
 
     public function getResults(): array
     {
-        return isset($this->graph) ? $this->graph->getDefinitions() : [];
+        return isset($this->graph) ? $this->graph->getDefinitions() : $this->completedResults;
     }
 
     public function visitSimpleValue(mixed $value): ValueContext
@@ -216,7 +239,7 @@ class ValueVisitor
     {
         $owner = $valueContext->getContextObject();
         $collection = $valueContext->getUnencodedValue();
-        if (!$this->handler instanceof DoctrineMetadataHandler || $owner === null
+        if (!$this->handler instanceof MetadataExportPolicyInterface || $owner === null
             || (!$collection instanceof Collection && !is_array($collection))
         ) {
             return;
@@ -236,14 +259,10 @@ class ValueVisitor
     {
         $object = $valueContext->getValue();
 
-        $objectHandled = $this->objectHandlerRegistry->runHandlers($valueContext);
-        $hasMetadata = !$objectHandled && $this->handler->canHandle($object);
+        $exportMode = $this->objectHandlerRegistry->runHandlers($valueContext) ? null : $this->getObjectExportMode($object);
+        $exportAsFixture = $exportMode?->allowsFixture() ?? false;
 
-        if (
-            !$objectHandled
-            && $object instanceof \Stringable
-            && (!$hasMetadata || $this->handler::class === NonSpecificMetadataHandler::class)
-        ) {
+        if ($object instanceof \Stringable && $exportMode?->allowsText()) {
             $mode = $valueContext->getStringableWriteMode();
             if ($mode === StringableWriteMode::Text) {
                 $valueContext->setLiteralString((string) $object);
@@ -255,7 +274,7 @@ class ValueVisitor
                 $valueContext->setSourceValue(new DeferredStringable(
                     $object,
                     $mode,
-                    fn (): ?AliceExpression => $hasMetadata
+                    fn (): ?AliceExpression => $exportAsFixture
                         ? $this->visitFixtureReference($object)
                         : throw $this->unknownObjectType($object),
                 ));
@@ -264,7 +283,7 @@ class ValueVisitor
             }
         }
 
-        if ($hasMetadata) {
+        if ($exportAsFixture) {
             $reference = $this->visitFixtureReference($object);
             if ($reference === null) {
                 $valueContext->setSkipped(true);
@@ -278,6 +297,13 @@ class ValueVisitor
         if (!$valueContext->isSkipped() && !$valueContext->isModified()) {
             throw $this->unknownObjectType($valueContext->getValue());
         }
+    }
+
+    private function getObjectExportMode(object $object): ObjectExportMode
+    {
+        return $this->handler instanceof MetadataExportPolicyInterface
+            ? $this->handler->getObjectExportMode($object)
+            : ObjectExportMode::fromMetadataSupport($this->handler->canHandle($object));
     }
 
     private function visitFixtureReference(object $object): ?AliceExpression
@@ -308,64 +334,78 @@ class ValueVisitor
         $reflectionClass = new \ReflectionClass($class);
         $writePlan = $this->fixtureWriteRouteResolver->createPlan($object, $reflectionClass, $this->graph->context);
         $newObject = $reflectionClass->newInstanceWithoutConstructor();
-        $propertyMetadatas = $this->classMetadataProvider->getPropertyMetadata($reflectionClass);
-        $visitProperty = function (ValueContext $valueContext, bool $constructorOnly): void {
-            if ($constructorOnly) {
-                $this->transformProperty($valueContext);
-            }
-            $this->visitValue($valueContext, preserveEmptyArrays: $constructorOnly);
-        };
+        $hasRequiredConstructorArguments = $writePlan->hasRequiredConstructorArguments();
+        $visitProperty = $this->visitValue(...);
+        $visitUnwritableCollection = $this->visitUnwritableCollection(...);
 
-        foreach ($propertyMetadatas as $propertyMetadata) {
-            $reflectionProperty = new \ReflectionProperty($propertyMetadata->class, $propertyMetadata->name);
-            $reflectionProperty->setAccessible(true);
-
-            $isInitialized = $reflectionProperty->isInitialized($object);
-            $value = $isInitialized ? $reflectionProperty->getValue($object) : null;
-            $valueContext = new ValueContext($value, $class, $object, $propertyMetadata, $this);
-
-            if ($this->handler->shouldSkipProperty($valueContext)) {
-                continue;
-            }
-
-            $this->metadataResolver->resolve($valueContext);
-
-            if ($valueContext->isSkipped()) {
-                continue;
-            }
-
-            $visit = !$valueContext->isModified();
-            $constructorOnly = false;
-            if ($visit) {
-                $initialValue = $reflectionProperty->isInitialized($newObject) ?
-                    $reflectionProperty->getValue($newObject) : null;
-
-                $value = $valueContext->getUnencodedValue();
-                if ($value === $initialValue) {
-                    if (!$isInitialized || !$writePlan->hasRequiredConstructorArguments()) {
-                        continue;
-                    }
-
-                    $constructorOnly = true;
-                } else {
-                    $this->transformProperty($valueContext);
-                }
-            }
-
-            if ($valueContext->isSkipped()) {
-                continue;
-            }
-
-            $writePlan->addProperty(
-                $reflectionProperty,
-                $this->propertyNamer->createName($valueContext),
-                $valueContext,
-                $constructorOnly,
-                $visit ? $visitProperty : null,
-                $this->visitUnwritableCollection(...),
+        foreach ($this->classMetadataProvider->getPropertyMetadata($reflectionClass) as $metadata) {
+            $property = $this->prepareProperty(
+                $object,
+                $class,
+                $newObject,
+                $metadata,
+                $hasRequiredConstructorArguments,
             );
+            if ($property !== null) {
+                $writePlan->addProperty($property, $visitProperty, $visitUnwritableCollection);
+            }
         }
 
         return $writePlan->buildDefinition($class);
+    }
+
+    private function prepareProperty(
+        object $object,
+        string $class,
+        object $newObject,
+        PropertyMetadata $metadata,
+        bool $hasRequiredConstructorArguments,
+    ): ?PreparedProperty {
+        $reflection = new \ReflectionProperty($metadata->class, $metadata->name);
+        $reflection->setAccessible(true);
+        $isInitialized = $reflection->isInitialized($object);
+        $value = $isInitialized ? $reflection->getValue($object) : null;
+        $context = new ValueContext($value, $class, $object, $metadata, $this);
+        if ($this->handler->shouldSkipProperty($context)) {
+            return null;
+        }
+
+        if ($this->metadataResolver === null) {
+            MetadataResolver::applyOverrides($context);
+        } else {
+            $this->metadataResolver->resolve($context);
+        }
+        if ($context->isSkipped()) {
+            return null;
+        }
+
+        $needsTraversal = !$context->isModified();
+        $constructorOnly = false;
+        $source = $context->getUnencodedValue();
+        if ($needsTraversal) {
+            $initialValue = $reflection->isInitialized($newObject) ? $reflection->getValue($newObject) : null;
+            $constructorOnly = $source === $initialValue;
+            if ($constructorOnly && (!$isInitialized || !$hasRequiredConstructorArguments)) {
+                return null;
+            }
+
+            $this->transformProperty($context);
+            // The write plan can still identify a skipped constructor default as a missing required value.
+            if ($context->isSkipped() && !$constructorOnly) {
+                return null;
+            }
+        }
+
+        $name = $this->propertyNamer->createName($context);
+        $graphSource = $constructorOnly ? $source : $context->getUnencodedValue();
+
+        return new PreparedProperty(
+            $reflection,
+            $name,
+            $context,
+            $constructorOnly,
+            $needsTraversal,
+            is_object($graphSource) || is_array($graphSource),
+        );
     }
 }

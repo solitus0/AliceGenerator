@@ -22,6 +22,11 @@ The `DoctrineMetadataHandler` automatically:
 - Handles Doctrine proxy objects
 - Uses Doctrine metadata to process mapped entities
 
+Custom metadata handlers can implement `MetadataExportPolicyInterface` to choose how objects are represented
+and identify the owning field for inverse collections. The generator still checks whether the selected write route
+accepts text before converting a `Stringable` value. Handlers that implement `MetadataHandlerInterface` alone
+continue to use `canHandle()` to identify objects that should be exported as fixtures.
+
 ## Naming Strategies
 
 Customize property and reference naming for your fixtures.
@@ -39,8 +44,9 @@ $generator = FixtureGeneratorBuilder::create()
     ->build();
 ```
 
-The property namer runs before recursive traversal so the emitted name can guide write routing.
-Object values passed to the namer have not yet been converted to fixture references.
+The property namer sees the value after metadata overrides or the first matching property transformer. This includes
+initialized defaults that could supply a required constructor argument. The emitted name guides write routing before
+recursive traversal converts object values to fixture references.
 
 ### Reference Namer
 

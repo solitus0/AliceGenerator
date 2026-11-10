@@ -14,6 +14,7 @@ use Solitus0\AliceGenerator\Generator\FixtureGenerator;
 use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
 use Solitus0\AliceGenerator\Generator\PhpGenerator;
 use Solitus0\AliceGenerator\Generator\YamlGenerator;
+use Solitus0\AliceGenerator\MetadataHandler\MetadataHandlerInterface;
 use Solitus0\AliceGenerator\MetadataHandler\NonSpecificMetadataHandler;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerInterface;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistryInterface;
@@ -51,6 +52,7 @@ use Solitus0\AliceGenerator\Tests\Generator\Fixtures\Visibility;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\WritablePropertyFixture;
 use Solitus0\AliceGenerator\Tests\Support\FixtureTestCase;
 use Solitus0\AliceGenerator\ValueContext;
+use Solitus0\AliceGenerator\ValueVisitor;
 use Symfony\Component\Yaml\Yaml;
 
 final class FixtureRoundTripTest extends FixtureTestCase
@@ -306,15 +308,56 @@ final class FixtureRoundTripTest extends FixtureTestCase
         self::assertEquals($source, $defaultRun['ValueFixture-1']);
     }
 
-    public function testExportsStringableValuesAsLiteralText(): void
+    #[DataProvider('nonSpecificMetadataHandlers')]
+    public function testExportsStringableValuesAsLiteralText(MetadataHandlerInterface $handler): void
     {
         $source = new ValueFixture(new StringableText('@helpdesk'));
-        $objects = $this->loadFixtures($this->generate($source));
+        $generator = FixtureGeneratorBuilder::create()->setMetadataHandler($handler)->build();
+        $objects = $this->loadFixtures($generator->generate($source, FixtureGenerationContext::create()));
         $fixture = $objects['ValueFixture-1'];
 
         self::assertInstanceOf(ValueFixture::class, $fixture);
         self::assertSame('@helpdesk', $fixture->value);
         self::assertCount(1, $objects);
+    }
+
+    public static function nonSpecificMetadataHandlers(): iterable
+    {
+        yield 'default' => [new NonSpecificMetadataHandler()];
+        yield 'transparent subclass' => [new class() extends NonSpecificMetadataHandler {}];
+    }
+
+    public function testPreservesObjectIdentityWithALegacyMetadataHandler(): void
+    {
+        $handler = new class() implements MetadataHandlerInterface {
+            public function getClass(object $object): string
+            {
+                return $object::class;
+            }
+
+            public function canHandle(object $object): bool
+            {
+                return true;
+            }
+
+            public function preHandle(object $object): void
+            {
+            }
+
+            public function shouldSkipProperty(ValueContext $valueContext): bool
+            {
+                return false;
+            }
+        };
+        $generator = FixtureGeneratorBuilder::create()->setMetadataHandler($handler)->build();
+        $source = new ValueFixture(new StringableText('@helpdesk'));
+        $objects = $this->loadFixtures($generator->generate($source, FixtureGenerationContext::create()));
+        $fixture = $objects['ValueFixture-1'];
+        $text = $objects['StringableText-1'];
+
+        self::assertInstanceOf(ValueFixture::class, $fixture);
+        self::assertInstanceOf(StringableText::class, $text);
+        self::assertSame($text, $fixture->value);
     }
 
     public function testExportsStringableItemsInAPlainArray(): void
@@ -489,6 +532,41 @@ final class FixtureRoundTripTest extends FixtureTestCase
         $objects = $this->loadFixtures($generator->generate($source, FixtureGenerationContext::create()));
 
         self::assertSame(['fixture-2', 'fixture-3', 'fixture-4'], array_keys($objects));
+    }
+
+    public function testGenerationReleasesItsGraphEvenWhenAnExtensionKeepsTheTraversal(): void
+    {
+        $namer = new class() implements PropertyNamerInterface {
+            public ?ValueVisitor $traversal = null;
+
+            public function createName(ValueContext $valueContext): string
+            {
+                $this->traversal = $valueContext->getValueVisitor();
+
+                return $valueContext->getPropName();
+            }
+        };
+        $generator = FixtureGeneratorBuilder::create()->setPropertyNamer($namer)->build();
+        $context = FixtureGenerationContext::create();
+        $child = new WritablePropertyFixture('child');
+        $source = new ValueFixture($child);
+        $rootReference = \WeakReference::create($source);
+        $childReference = \WeakReference::create($child);
+
+        $yaml = $generator->generate($source, $context);
+        $firstTraversal = $namer->traversal;
+        unset($source, $child);
+        gc_collect_cycles();
+
+        self::assertNull($rootReference->get());
+        self::assertNull($childReference->get());
+        self::assertInstanceOf(ValueVisitor::class, $firstTraversal);
+        self::assertEquals(Yaml::parse($yaml), $firstTraversal->getResults());
+
+        $generator->generate(new WritablePropertyFixture('next run'), $context);
+
+        self::assertNotSame($firstTraversal, $namer->traversal);
+        self::assertEquals(Yaml::parse($yaml), $firstTraversal->getResults());
     }
 
     public function testNestedGenerationKeepsItsOwnGraphAndRecursionLimit(): void
@@ -850,6 +928,54 @@ final class FixtureRoundTripTest extends FixtureTestCase
         self::assertSame('changed', $changed->getLegacy());
     }
 
+    public function testNamesPropertiesAfterApplyingTransformsAndMetadataOverrides(): void
+    {
+        $handler = new class() extends NonSpecificMetadataHandler {
+            public function shouldSkipProperty(ValueContext $valueContext): bool
+            {
+                if ($valueContext->getValue() === 'override') {
+                    $valueContext->getMetadata()->staticData = 'from metadata';
+                }
+
+                return false;
+            }
+        };
+        $namer = new class() implements PropertyNamerInterface {
+            /** @var list<mixed> */
+            public array $values = [];
+
+            public function createName(ValueContext $valueContext): string
+            {
+                $value = $valueContext->getValue();
+                $this->values[] = $value;
+
+                return in_array($value, ['prepared seed', 'prepared changed', 'from metadata'], true)
+                    ? 'needed'
+                    : $valueContext->getPropName();
+            }
+        };
+        $context = FixtureGenerationContext::create()->addPropertyTransformRule(new PropertyTransformRule(
+            new ClassPropertyMatcher(RenamedConstructorFixture::class, 'legacy'),
+            new CallbackValueTransformer(
+                static fn (ValueContext $valueContext): string => 'prepared ' . $valueContext->getValue(),
+            ),
+        ));
+        $generator = FixtureGeneratorBuilder::create()->setMetadataHandler($handler)->setPropertyNamer($namer)->build();
+        $objects = $this->loadFixtures($generator->generate([
+            new RenamedConstructorFixture('seed'),
+            new RenamedConstructorFixture('changed'),
+            new RenamedConstructorFixture('override'),
+        ], $context));
+
+        self::assertSame(['prepared seed', 'prepared changed', 'from metadata'], $namer->values);
+        $values = [];
+        foreach ($objects as $fixture) {
+            self::assertInstanceOf(RenamedConstructorFixture::class, $fixture);
+            $values[] = $fixture->getLegacy();
+        }
+        self::assertSame($namer->values, $values);
+    }
+
     public function testVisitsAnUnwritableRelationOnlyWhenReachedThroughAnEmittedPath(): void
     {
         $child = new ValueFixture('child');
@@ -1081,10 +1207,16 @@ final class FixtureRoundTripTest extends FixtureTestCase
 
         $context = FixtureGenerationContext::create()->setMaximumRecursion(0);
 
+        $source = new WritablePropertyFixture('invalid');
+        $reference = \WeakReference::create($source);
+
         try {
-            $generator->generate(new WritablePropertyFixture('invalid'), $context);
+            $generator->generate($source, $context);
             self::fail('Generation accepted an empty fixture property name.');
         } catch (InvalidPropertyNameException) {
+            unset($source);
+            gc_collect_cycles();
+            self::assertNull($reference->get());
             $objects = $this->loadFixtures($generator->generate(new WritablePropertyFixture('Alice'), $context));
         }
 

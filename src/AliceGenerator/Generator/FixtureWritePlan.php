@@ -57,17 +57,19 @@ final class FixtureWritePlan
     }
 
     /**
-     * @param (\Closure(ValueContext, bool): void)|null $visit
+     * @param \Closure(ValueContext, bool): void $visit
      * @param \Closure(ValueContext, string|null): bool $visitUnwritableCollection
      */
     public function addProperty(
-        \ReflectionProperty $reflectionProperty,
-        string $propertyName,
-        ValueContext $valueContext,
-        bool $constructorOnly,
-        ?\Closure $visit,
+        PreparedProperty $property,
+        \Closure $visit,
         \Closure $visitUnwritableCollection,
     ): void {
+        $reflectionProperty = $property->reflection;
+        $propertyName = $property->name;
+        $valueContext = $property->context;
+        $constructorOnly = $property->constructorOnly;
+
         if ($constructorOnly && !$this->canSupplyDefaultValue($propertyName)) {
             return;
         }
@@ -78,15 +80,14 @@ final class FixtureWritePlan
 
         $route = $this->resolver->resolve($this->object, $this->reflectionClass, $reflectionProperty, $propertyName);
         if ($route['type'] === 'skip' && $this->generationContext->shouldSkipNonWritableProperties()) {
-            if (!$constructorOnly && $visit !== null) {
+            if (!$constructorOnly && $property->needsTraversal) {
                 $this->planUnwritableCollection($propertyName, $valueContext, $visitUnwritableCollection);
             }
 
             return;
         }
 
-        if ($visit !== null) {
-            $source = $valueContext->getUnencodedValue();
+        if ($property->needsTraversal) {
             $valueContext->setStringableWriteMode(fn (bool $arrayItem): StringableWriteMode => $this->stringableMode(
                 $reflectionProperty,
                 $propertyName,
@@ -96,7 +97,7 @@ final class FixtureWritePlan
             ));
             $visit($valueContext, $constructorOnly);
             if ($valueContext->isSkipped()) {
-                $this->prunedGraphValue = $this->prunedGraphValue || is_object($source) || is_array($source);
+                $this->prunedGraphValue = $this->prunedGraphValue || $property->sourceIsGraphValue;
 
                 return;
             }

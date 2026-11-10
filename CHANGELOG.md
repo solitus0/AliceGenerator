@@ -8,6 +8,14 @@
   `AliceExpression`. Transformer callbacks now receive unescaped source strings from `ValueContext::getValue()`.
 - Generated fixture expressions for enums now reference cases by name.
 
+### Removed
+
+- **Breaking for direct callers.** Removed the legacy JMS `Metadata\Driver\AttributeDriver` and
+  `Metadata\Provider\ClassMetadataProvider` classes. Use `FixtureGeneratorBuilder` for default reflection
+  discovery or implement `ClassMetadataProviderInterface` for custom discovery.
+- **Breaking for direct callers.** Removed `Storage\ObjectCacheCollection`. The generator manages object identity
+  within each generation run.
+
 ## [v0.1.5] – 2026-04-21
 
 ### Added

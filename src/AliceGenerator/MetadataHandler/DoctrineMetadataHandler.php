@@ -11,7 +11,7 @@ use Doctrine\Persistence\Mapping\ClassMetadata;
 use Solitus0\AliceGenerator\Exception\UnavailableObjectException;
 use Solitus0\AliceGenerator\ValueContext;
 
-class DoctrineMetadataHandler extends AbstractMetadataHandler
+class DoctrineMetadataHandler extends AbstractMetadataHandler implements MetadataExportPolicyInterface
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -23,6 +23,11 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
     public function canHandle(object $object): bool
     {
         return $this->getMetadata($object) instanceof ClassMetadata;
+    }
+
+    public function getObjectExportMode(object $object): ObjectExportMode
+    {
+        return ObjectExportMode::fromMetadataSupport($this->canHandle($object));
     }
 
     protected function getMetadata(object $object): bool|ClassMetadata
@@ -45,7 +50,6 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
         }
     }
 
-    /** @internal */
     public function findOwningFieldForInverseCollection(object $object, string $property): ?string
     {
         $metadata = $this->getMetadata($object);

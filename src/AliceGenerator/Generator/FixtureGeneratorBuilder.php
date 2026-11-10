@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Solitus0\AliceGenerator\Generator;
 
 use Solitus0\AliceGenerator\Metadata\Provider\ReflectionClassMetadataProvider;
-use Solitus0\AliceGenerator\Metadata\Resolver\MetadataResolver;
 use Solitus0\AliceGenerator\MetadataHandler\MetadataHandlerInterface;
 use Solitus0\AliceGenerator\MetadataHandler\NonSpecificMetadataHandler;
 use Solitus0\AliceGenerator\ObjectHandler as ObjectHandler;
@@ -103,17 +102,16 @@ class FixtureGeneratorBuilder
 
     public function build(): FixtureGenerator
     {
-        return new FixtureGenerator(
-            new ValueVisitor(
-                $this->classMetadataProvider,
-                $this->handler,
-                new MetadataResolver(),
-                $this->objectHandlerRegistry,
-                $this->propertyNamer,
-                $this->referenceNamer,
-                new FixtureWriteRouteResolver(),
-            ),
-            $this->generator
+        $visitor = new ValueVisitor(
+            $this->classMetadataProvider,
+            $this->handler,
+            null,
+            $this->objectHandlerRegistry,
+            $this->propertyNamer,
+            $this->referenceNamer,
+            new FixtureWriteRouteResolver(),
         );
+
+        return new FixtureGenerator($visitor->collectRunFixtures(...), $this->generator);
     }
 }

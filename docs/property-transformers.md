@@ -102,7 +102,9 @@ class RandomIntTransformer implements ValueTransformerInterface
 }
 ```
 
-Use `setSourceValue()` for literal data. Custom transformers can use `setValue()` to supply fixture-ready Alice syntax.
+Use `setSourceValue()` for literal data. Custom transformers can use `setValue()` to supply fixture-ready Alice syntax,
+including strings nested inside arrays. To mix literal strings and expressions, use `setSourceValue()` and wrap only
+the expressions in `AliceExpression`.
 
 ---
 

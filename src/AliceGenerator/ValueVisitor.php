@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Solitus0\AliceGenerator;
 
-use Solitus0\AliceGenerator\Exception\InvalidPropertyNameException;
 use Solitus0\AliceGenerator\Exception\UnavailableObjectException;
 use Solitus0\AliceGenerator\Exception\UnknownObjectTypeException;
+use Solitus0\AliceGenerator\Generator\CollectionSelection;
 use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
 use Solitus0\AliceGenerator\Generator\FixtureGraph;
 use Solitus0\AliceGenerator\Generator\FixtureWriteRouteResolver;
@@ -15,7 +15,6 @@ use Solitus0\AliceGenerator\Metadata\Resolver\MetadataResolverInterface;
 use Solitus0\AliceGenerator\MetadataHandler\MetadataHandlerInterface;
 use Solitus0\AliceGenerator\MetadataHandler\NonSpecificMetadataHandler;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistryInterface;
-use Solitus0\AliceGenerator\PropertyNamer\PropertyNamer;
 use Solitus0\AliceGenerator\PropertyNamer\PropertyNamerInterface;
 use Solitus0\AliceGenerator\PropertyTransformer\ValueTransformerInterface;
 use Solitus0\AliceGenerator\ReferenceNamer\ReferenceNamerInterface;
@@ -45,7 +44,6 @@ class ValueVisitor
     public function setup(FixtureGenerationContext $generationContext): void
     {
         $this->graph = new FixtureGraph($generationContext, $this->handler, $this->referenceNamer);
-        $generationContext->getConstraintsCollection()->setMetadataHandler($this->handler);
     }
 
     /** @internal */
@@ -85,10 +83,11 @@ class ValueVisitor
 
     public function visitUnknownType(ValueContext $valueContext): void
     {
+        $this->transformProperty($valueContext);
         $this->visitValue($valueContext, preserveEmptyArrays: false);
     }
 
-    private function visitValue(ValueContext $valueContext, bool $preserveEmptyArrays): void
+    private function transformProperty(ValueContext $valueContext): void
     {
         $propertyMetadata = $valueContext->getMetadata();
         if ($propertyMetadata) {
@@ -97,6 +96,13 @@ class ValueVisitor
             if ($valueTransformer instanceof ValueTransformerInterface) {
                 $valueTransformer->transform($valueContext);
             }
+        }
+    }
+
+    private function visitValue(ValueContext $valueContext, bool $preserveEmptyArrays): void
+    {
+        if ($valueContext->isSkipped()) {
+            return;
         }
 
         $value = $valueContext->getUnencodedValue();
@@ -116,12 +122,32 @@ class ValueVisitor
         $this->visitArrayValue($valueContext, preserveEmptyArrays: false);
     }
 
+    /**
+     * @internal
+     * @param iterable<mixed> $collection
+     */
+    public function visitCollection(ValueContext $valueContext, iterable $collection): void
+    {
+        $items = CollectionSelection::select(
+            $collection,
+            $valueContext->getContextObjectClass(),
+            $this->getGenerationContext(),
+        );
+        if ($items === null) {
+            $valueContext->setSkipped(true);
+
+            return;
+        }
+
+        $valueContext->setSourceValue($items);
+        $this->visitArray($valueContext);
+    }
+
     private function visitArrayValue(ValueContext $valueContext, bool $preserveEmptyArrays): void
     {
         $array = $valueContext->getUnencodedValue();
         $keepEmpty = $preserveEmptyArrays && $array === [];
-        $allowsStringable = $valueContext->allowsStringable()
-            || $this->acceptsStringable($valueContext, arrayItem: true);
+        $allowsStringable = $valueContext->allowsStringableArrayItems();
 
         $items = [];
         foreach ($array as $key => $item) {
@@ -133,7 +159,7 @@ class ValueVisitor
             }
 
             if (!$itemValueContext->isSkipped()) {
-                $items[$key] = $itemValueContext->getFixtureValue();
+                $items[$key] = $itemValueContext->getUnencodedValue();
             }
         }
 
@@ -155,7 +181,7 @@ class ValueVisitor
             !$objectHandled
             && $object instanceof \Stringable
             && (!$hasMetadata || $this->handler::class === NonSpecificMetadataHandler::class)
-            && ($valueContext->allowsStringable() || $this->acceptsStringable($valueContext))
+            && $valueContext->allowsStringable()
         ) {
             $valueContext->setLiteralString((string) $object);
 
@@ -185,23 +211,6 @@ class ValueVisitor
         }
     }
 
-    private function acceptsStringable(ValueContext $valueContext, bool $arrayItem = false): bool
-    {
-        $owner = $valueContext->getContextObject();
-        $class = $valueContext->getContextObjectClass();
-        $metadata = $valueContext->getMetadata();
-        if ($owner === null || $class === null || $metadata === null || $this->propertyNamer::class !== PropertyNamer::class) {
-            return false;
-        }
-
-        return $this->fixtureWriteRouteResolver->acceptsStringable(
-            $owner,
-            new \ReflectionClass($class),
-            new \ReflectionProperty($metadata->class, $metadata->name),
-            $arrayItem,
-        );
-    }
-
     /** @return array<string, mixed> */
     private function buildFixtureDefinition(object $object, string $class): array
     {
@@ -211,12 +220,16 @@ class ValueVisitor
             return [];
         }
 
-        $prunedGraphValue = false;
-
         $reflectionClass = new \ReflectionClass($class);
         $writePlan = $this->fixtureWriteRouteResolver->createPlan($object, $reflectionClass, $this->graph->context);
         $newObject = $reflectionClass->newInstanceWithoutConstructor();
         $propertyMetadatas = $this->classMetadataProvider->getPropertyMetadata($reflectionClass);
+        $visitProperty = function (ValueContext $valueContext, bool $constructorOnly): void {
+            if ($constructorOnly) {
+                $this->transformProperty($valueContext);
+            }
+            $this->visitValue($valueContext, preserveEmptyArrays: $constructorOnly);
+        };
 
         foreach ($propertyMetadatas as $propertyMetadata) {
             $reflectionProperty = new \ReflectionProperty($propertyMetadata->class, $propertyMetadata->name);
@@ -232,25 +245,25 @@ class ValueVisitor
 
             $this->metadataResolver->resolve($valueContext);
 
+            if ($valueContext->isSkipped()) {
+                continue;
+            }
+
+            $visit = !$valueContext->isModified();
             $constructorOnly = false;
-            if (!$valueContext->isModified() && !$valueContext->isSkipped()) {
+            if ($visit) {
                 $initialValue = $reflectionProperty->isInitialized($newObject) ?
                     $reflectionProperty->getValue($newObject) : null;
 
                 $value = $valueContext->getUnencodedValue();
                 if ($value === $initialValue) {
-                    if (!$isInitialized || !$writePlan->canSupplyDefaultValue($reflectionProperty->getName())) {
+                    if (!$isInitialized || !$writePlan->hasRequiredConstructorArguments()) {
                         continue;
                     }
 
                     $constructorOnly = true;
-                    $this->visitValue($valueContext, preserveEmptyArrays: true);
                 } else {
-                    $this->visitUnknownType($valueContext);
-                }
-
-                if ($valueContext->isSkipped() && (is_object($value) || is_array($value))) {
-                    $prunedGraphValue = true;
+                    $this->transformProperty($valueContext);
                 }
             }
 
@@ -258,14 +271,15 @@ class ValueVisitor
                 continue;
             }
 
-            $propName = $this->propertyNamer->createName($valueContext);
-            if ($propName === '' || $propName === '0') {
-                throw new InvalidPropertyNameException('Property name must be a non empty string.');
-            }
-
-            $writePlan->addProperty($reflectionProperty, $propName, $valueContext, $constructorOnly);
+            $writePlan->addProperty(
+                $reflectionProperty,
+                $this->propertyNamer->createName($valueContext),
+                $valueContext,
+                $constructorOnly,
+                $visit ? $visitProperty : null,
+            );
         }
 
-        return $writePlan->buildDefinition($class, $prunedGraphValue);
+        return $writePlan->buildDefinition($class);
     }
 }

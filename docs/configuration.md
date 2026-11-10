@@ -39,10 +39,15 @@ $generator = FixtureGeneratorBuilder::create()
     ->build();
 ```
 
+The property namer runs before recursive traversal so the emitted name can guide write routing.
+Object values passed to the namer have not yet been converted to fixture references.
+
 ### Reference Namer
 
 Reference keys used in generated fixtures (e.g., `@User-1`) are created by a **Reference Namer**.
 Each object gets one reference name per generation run. Repeated visits reuse that name.
+If different objects request the same name, later objects receive an unused numeric suffix such as
+`User-1-2`. Names reserved for skipped objects also stay reserved for the rest of the run.
 
 You can configure a custom reference namer on the fixture generator builder:
 
@@ -206,9 +211,13 @@ $context->addPersistedObjectConstraint([$post1, $post2]);
 ```
 ![Posts constrained](images/constrained2x.png)
 
+Each run groups the registered object identities using its configured metadata handler.
+The same context can be reused with different handlers.
+
 ### Collection Handling
 
-Control which collections and items are included:
+Collection options apply to Doctrine collection properties. Limits count selected items per collection
+before recursion or other graph rules can prune them. Items excluded by a limit never reach the skip callbacks.
 
 Skip entire collections for owner classes:
 

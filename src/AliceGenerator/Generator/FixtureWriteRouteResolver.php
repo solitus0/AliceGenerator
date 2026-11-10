@@ -38,7 +38,8 @@ class FixtureWriteRouteResolver
         \ReflectionProperty $reflectionProperty,
         string $propertyName
     ): array {
-        if ($reflectionProperty->isPublic() && !$reflectionProperty->isReadOnly()) {
+        $destination = $this->getDestinationProperty($reflectionClass, $reflectionProperty, $propertyName);
+        if ($destination?->isPublic() && !$destination->isReadOnly()) {
             return ['type' => 'property'];
         }
 
@@ -58,6 +59,11 @@ class FixtureWriteRouteResolver
             return ['type' => 'setter', 'method' => $setterMethod];
         }
 
+        // A custom namer may intentionally rename a public property for a custom output generator.
+        if ($destination === null && $reflectionProperty->isPublic() && !$reflectionProperty->isReadOnly()) {
+            return ['type' => 'property'];
+        }
+
         return ['type' => 'skip'];
     }
 
@@ -68,7 +74,27 @@ class FixtureWriteRouteResolver
         bool $arrayItem,
     ): bool {
         $name = $property->getName();
-        $route = $this->resolve($object, $class, $property, $name);
+
+        return $this->acceptsStringableAtRoute(
+            $class,
+            $property,
+            $name,
+            $this->resolve($object, $class, $property, $name),
+            $arrayItem,
+        );
+    }
+
+    /**
+     * @internal
+     * @param array{type: 'property'|'constructor'|'setter'|'skip', position?: int, method?: string} $route
+     */
+    public function acceptsStringableAtRoute(
+        \ReflectionClass $class,
+        \ReflectionProperty $property,
+        string $name,
+        array $route,
+        bool $arrayItem,
+    ): bool {
         if ($route['type'] === 'skip') {
             return false;
         }
@@ -92,25 +118,44 @@ class FixtureWriteRouteResolver
             return false;
         }
 
-        return $this->propertyAcceptsType($class, $property, $valueType, $arrayItem);
+        return $this->propertyAcceptsType(
+            $class,
+            $this->getDestinationProperty($class, $property, $name),
+            $name,
+            $valueType,
+            $arrayItem,
+        );
+    }
+
+    private function getDestinationProperty(
+        \ReflectionClass $class,
+        \ReflectionProperty $source,
+        string $name,
+    ): ?\ReflectionProperty {
+        if ($name === $source->getName()) {
+            return $source;
+        }
+
+        return $class->hasProperty($name) ? $class->getProperty($name) : null;
     }
 
     private function propertyAcceptsType(
         \ReflectionClass $class,
-        \ReflectionProperty $property,
+        ?\ReflectionProperty $property,
+        string $name,
         string $valueType,
         bool $arrayItem,
     ): bool {
         if (!class_exists(PropertyWriteInfo::class)) {
-            $setter = $this->findPropertySetter($class, $property->getName());
+            $setter = $this->findPropertySetter($class, $name);
 
             return !$arrayItem && ($setter === null
-                ? $property->isPublic() && $this->acceptsType($property->getType(), $valueType)
+                ? $property?->isPublic() && $this->acceptsType($property->getType(), $valueType)
                 : !$setter->isStatic() && $this->acceptsType($setter->getParameters()[0]->getType(), $valueType));
         }
 
         $extractor = $this->writeInfoExtractor ??= new ReflectionExtractor(['set'], null, null, false);
-        $write = $extractor->getWriteInfo($class->getName(), $property->getName(), [
+        $write = $extractor->getWriteInfo($class->getName(), $name, [
             'enable_getter_setter_extraction' => true,
             'enable_constructor_extraction' => false,
             'enable_adder_remover_extraction' => $arrayItem,
@@ -122,7 +167,7 @@ class FixtureWriteRouteResolver
 
         return match ($write?->getType()) {
             PropertyWriteInfo::TYPE_PROPERTY => $write->getVisibility() === PropertyWriteInfo::VISIBILITY_PUBLIC
-                && $property->isPublic()
+                && $property?->isPublic()
                 && !$property->isStatic()
                 && $this->acceptsType($property->getType(), $valueType),
             PropertyWriteInfo::TYPE_METHOD => !$write->isStatic()

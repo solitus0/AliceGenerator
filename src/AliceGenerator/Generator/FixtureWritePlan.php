@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Solitus0\AliceGenerator\Generator;
 
+use Solitus0\AliceGenerator\Exception\InvalidPropertyNameException;
 use Solitus0\AliceGenerator\ValueContext;
 
 /** @internal */
@@ -21,6 +22,8 @@ final class FixtureWritePlan
     /** @var list<array{method: string, value: mixed}> */
     private array $setterCandidates = [];
 
+    private bool $prunedGraphValue = false;
+
     public function __construct(
         private readonly object $object,
         private readonly \ReflectionClass $reflectionClass,
@@ -29,7 +32,12 @@ final class FixtureWritePlan
     ) {
     }
 
-    public function canSupplyDefaultValue(string $propertyName): bool
+    public function hasRequiredConstructorArguments(): bool
+    {
+        return $this->reflectionClass->getConstructor()?->getNumberOfRequiredParameters() > 0;
+    }
+
+    private function canSupplyDefaultValue(string $propertyName): bool
     {
         foreach ($this->reflectionClass->getConstructor()?->getParameters() ?? [] as $parameter) {
             if ($parameter->getName() === $propertyName) {
@@ -40,14 +48,45 @@ final class FixtureWritePlan
         return false;
     }
 
+    /** @param (\Closure(ValueContext, bool): void)|null $visit */
     public function addProperty(
         \ReflectionProperty $reflectionProperty,
         string $propertyName,
         ValueContext $valueContext,
         bool $constructorOnly,
+        ?\Closure $visit,
     ): void {
+        if ($constructorOnly && !$this->canSupplyDefaultValue($propertyName)) {
+            return;
+        }
+
+        if ($propertyName === '' || $propertyName === '0') {
+            throw new InvalidPropertyNameException('Property name must be a non empty string.');
+        }
+
         $route = $this->resolver->resolve($this->object, $this->reflectionClass, $reflectionProperty, $propertyName);
-        $value = $valueContext->getFixtureValue();
+        if ($route['type'] === 'skip' && $this->generationContext->shouldSkipNonWritableProperties()) {
+            return;
+        }
+
+        if ($visit !== null) {
+            $source = $valueContext->getUnencodedValue();
+            $valueContext->setStringableWriteCheck(fn (bool $arrayItem): bool => $this->resolver->acceptsStringableAtRoute(
+                $this->reflectionClass,
+                $reflectionProperty,
+                $propertyName,
+                $route,
+                $arrayItem,
+            ));
+            $visit($valueContext, $constructorOnly);
+            if ($valueContext->isSkipped()) {
+                $this->prunedGraphValue = $this->prunedGraphValue || is_object($source) || is_array($source);
+
+                return;
+            }
+        }
+
+        $value = $valueContext->getUnencodedValue();
 
         if ($constructorOnly) {
             if ($route['type'] === 'property' || $route['type'] === 'constructor') {
@@ -75,16 +114,14 @@ final class FixtureWritePlan
 
                 break;
             case 'skip':
-                if (!$this->generationContext->shouldSkipNonWritableProperties()) {
-                    $this->properties[$propertyName] = $value;
-                }
+                $this->properties[$propertyName] = $value;
 
                 break;
         }
     }
 
     /** @return array<string, mixed> */
-    public function buildDefinition(string $class, bool $prunedGraphValue): array
+    public function buildDefinition(string $class): array
     {
         $definition = [];
         $properties = $this->properties;
@@ -107,10 +144,10 @@ final class FixtureWritePlan
                 }
             }
 
-            if ($this->reflectionClass->getConstructor()?->getNumberOfRequiredParameters() > 0) {
+            if ($this->hasRequiredConstructorArguments()) {
                 if ($setterCandidates !== [] && $this->generationContext->allowsConstructorBypassFor($class)) {
                     $definition['__construct'] = false;
-                } elseif ($prunedGraphValue) {
+                } elseif ($this->prunedGraphValue) {
                     return [];
                 }
             }

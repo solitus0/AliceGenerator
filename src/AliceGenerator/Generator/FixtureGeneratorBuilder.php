@@ -4,9 +4,7 @@ declare(strict_types=1);
 
 namespace Solitus0\AliceGenerator\Generator;
 
-use Metadata\MetadataFactory;
-use Solitus0\AliceGenerator\Metadata\Driver\AttributeDriver;
-use Solitus0\AliceGenerator\Metadata\Provider\ClassMetadataProvider;
+use Solitus0\AliceGenerator\Metadata\Provider\ReflectionClassMetadataProvider;
 use Solitus0\AliceGenerator\Metadata\Resolver\MetadataResolver;
 use Solitus0\AliceGenerator\MetadataHandler\MetadataHandlerInterface;
 use Solitus0\AliceGenerator\MetadataHandler\NonSpecificMetadataHandler;
@@ -25,9 +23,7 @@ class FixtureGeneratorBuilder
 
     private readonly ObjectHandlerRegistryInterface $objectHandlerRegistry;
 
-    private readonly ClassMetadataProvider $classMetadataProvider;
-
-    private readonly MetadataResolver $metadataResolver;
+    private readonly ReflectionClassMetadataProvider $classMetadataProvider;
 
     private PropertyNamerInterface $propertyNamer;
 
@@ -50,8 +46,7 @@ class FixtureGeneratorBuilder
 
         $this->objectHandlerRegistry = $objectHandlerRegistry;
 
-        $this->classMetadataProvider = new ClassMetadataProvider(new MetadataFactory(new AttributeDriver()));
-        $this->metadataResolver = new MetadataResolver();
+        $this->classMetadataProvider = new ReflectionClassMetadataProvider();
         $this->referenceNamer = new ClassNamer();
         $this->propertyNamer = new PropertyNamer();
     }
@@ -112,7 +107,7 @@ class FixtureGeneratorBuilder
             new ValueVisitor(
                 $this->classMetadataProvider,
                 $this->handler,
-                $this->metadataResolver,
+                new MetadataResolver(),
                 $this->objectHandlerRegistry,
                 $this->propertyNamer,
                 $this->referenceNamer,

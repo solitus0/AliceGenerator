@@ -14,6 +14,7 @@ use Solitus0\AliceGenerator\Generator\FixtureGenerator;
 use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
 use Solitus0\AliceGenerator\Generator\PhpGenerator;
 use Solitus0\AliceGenerator\Generator\YamlGenerator;
+use Solitus0\AliceGenerator\MetadataHandler\NonSpecificMetadataHandler;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerInterface;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistryInterface;
 use Solitus0\AliceGenerator\PropertyNamer\PropertyNamerInterface;
@@ -21,13 +22,18 @@ use Solitus0\AliceGenerator\PropertyTransformer\CallbackValueTransformer;
 use Solitus0\AliceGenerator\PropertyTransformer\ClassPropertyMatcher;
 use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRule;
 use Solitus0\AliceGenerator\PropertyTransformer\SimpleValueTransformer;
+use Solitus0\AliceGenerator\PropertyTransformer\ValueTransformerInterface;
 use Solitus0\AliceGenerator\ReferenceNamer\CallbackNamer;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorDefaultsFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorOnlyFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ConstructorSetterFallbackFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\ExpressionLikeEnum;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\MixedRoutingFixture;
+use Solitus0\AliceGenerator\Tests\Generator\Fixtures\Other\WritablePropertyFixture as OtherWritablePropertyFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\Priority;
+use Solitus0\AliceGenerator\Tests\Generator\Fixtures\PropertyDiscoveryChildFixture;
+use Solitus0\AliceGenerator\Tests\Generator\Fixtures\PropertyDiscoveryParentFixture;
+use Solitus0\AliceGenerator\Tests\Generator\Fixtures\RenamedConstructorFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\RequiredDefaultArrayFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\RequiredNullableConstructorFixture;
 use Solitus0\AliceGenerator\Tests\Generator\Fixtures\RequiredRelationFixture;
@@ -147,6 +153,156 @@ final class FixtureRoundTripTest extends FixtureTestCase
         yield 'PHP' => ['php'];
     }
 
+    #[DataProvider('fixtureFormats')]
+    public function testPreservesCustomTransformerSyntaxAtEveryNestingDepth(string $format): void
+    {
+        $generator = FixtureGeneratorBuilder::create()
+            ->setGenerator($format === 'php' ? new PhpGenerator() : new YamlGenerator(3, 4))
+            ->build()
+        ;
+        $transformer = new class() implements ValueTransformerInterface {
+            public function transform(ValueContext $valueContext): void
+            {
+                $values = ['<(1 + 2)>', ['@WritablePropertyFixture-1', new AliceExpression('<(2 + 2)>')]];
+                if ($valueContext->getValue() === 'syntax') {
+                    $valueContext->setValue($values);
+                } else {
+                    $valueContext->setSourceValue($values);
+                }
+            }
+        };
+        $context = FixtureGenerationContext::create()->addPropertyTransformRule(new PropertyTransformRule(
+            new ClassPropertyMatcher(ValueFixture::class, 'value'),
+            $transformer,
+        ));
+
+        $objects = $this->loadFixtures($generator->generate([
+            new ValueFixture('syntax'),
+            new ValueFixture('literal'),
+            new WritablePropertyFixture('target'),
+        ], $context), $format);
+        $syntax = $objects['ValueFixture-1'];
+        $literal = $objects['ValueFixture-2'];
+
+        self::assertInstanceOf(ValueFixture::class, $syntax);
+        self::assertInstanceOf(ValueFixture::class, $literal);
+        self::assertSame([3, [$objects['WritablePropertyFixture-1'], 4]], $syntax->value);
+        self::assertSame(['<(1 + 2)>', ['@WritablePropertyFixture-1', 4]], $literal->value);
+    }
+
+    public function testDiscoversInheritedAndShadowedPropertiesInHierarchyOrder(): void
+    {
+        $namer = new class() implements PropertyNamerInterface {
+            /** @var list<array{string, string}> */
+            public array $properties = [];
+
+            public function createName(ValueContext $valueContext): string
+            {
+                $metadata = $valueContext->getMetadata();
+                assert($metadata !== null);
+                $this->properties[] = [$metadata->class, $metadata->name];
+
+                return $metadata->name;
+            }
+        };
+        $generator = FixtureGeneratorBuilder::create()->setPropertyNamer($namer)->build();
+        $context = FixtureGenerationContext::create()->addPropertyTransformRule(new PropertyTransformRule(
+            new ClassPropertyMatcher(PropertyDiscoveryChildFixture::class, 'inheritedPublic'),
+            new SimpleValueTransformer('matched on child'),
+        ));
+        $source = new PropertyDiscoveryChildFixture();
+        $source->setInheritedPrivate('inherited private value');
+        $source->setParentShared('hidden parent value');
+        $source->setShared('child value');
+        $source->inheritedPublic = 'inherited public value';
+        $source->childOnly = 'child only value';
+
+        $objects = $this->loadFixtures($generator->generate($source, $context));
+        $fixture = $objects['PropertyDiscoveryChildFixture-1'];
+
+        self::assertSame([
+            [PropertyDiscoveryParentFixture::class, 'inheritedPrivate'],
+            [PropertyDiscoveryChildFixture::class, 'shared'],
+            [PropertyDiscoveryChildFixture::class, 'inheritedPublic'],
+            [PropertyDiscoveryChildFixture::class, 'childOnly'],
+        ], $namer->properties);
+        self::assertInstanceOf(PropertyDiscoveryChildFixture::class, $fixture);
+        self::assertSame('inherited private value', $fixture->getInheritedPrivate());
+        self::assertSame('child value', $fixture->getShared());
+        self::assertSame('parent default', $fixture->getParentShared());
+        self::assertSame('matched on child', $fixture->inheritedPublic);
+        self::assertSame('child only value', $fixture->childOnly);
+    }
+
+    public function testAppliesMetadataOverridesFromTheConfiguredHandler(): void
+    {
+        $handler = new class() extends NonSpecificMetadataHandler {
+            public function shouldSkipProperty(ValueContext $valueContext): bool
+            {
+                $metadata = $valueContext->getMetadata();
+                if ($metadata?->class === ValueFixture::class) {
+                    $metadata->staticData = '<(1 + 2)>';
+                } elseif ($metadata?->class === WritablePropertyFixture::class) {
+                    $metadata->ignore = true;
+                }
+
+                return false;
+            }
+        };
+        $generator = FixtureGeneratorBuilder::create()->setMetadataHandler($handler)->build();
+        $fixtures = $generator->generate([
+            new ValueFixture('replace me'),
+            new WritablePropertyFixture('ignore me'),
+        ], FixtureGenerationContext::create());
+        $objects = $this->loadFixtures($fixtures);
+
+        self::assertSame(['ValueFixture-1'], array_keys($objects));
+        self::assertInstanceOf(ValueFixture::class, $objects['ValueFixture-1']);
+        self::assertSame(3, $objects['ValueFixture-1']->value);
+    }
+
+    public function testKeepsMetadataOverridesLocalToOnePropertyVisit(): void
+    {
+        $handler = new class() extends NonSpecificMetadataHandler {
+            public function shouldSkipProperty(ValueContext $valueContext): bool
+            {
+                $metadata = $valueContext->getMetadata();
+                if ($metadata !== null && $valueContext->getValue() === 'mask me') {
+                    $metadata->staticData = 'masked';
+                } elseif ($metadata !== null && $valueContext->getValue() === 'ignore me') {
+                    $metadata->ignore = true;
+                }
+
+                return false;
+            }
+        };
+        $builder = FixtureGeneratorBuilder::create()->setMetadataHandler($handler);
+        $generator = $builder->build();
+        $context = FixtureGenerationContext::create();
+
+        $objects = $this->loadFixtures($generator->generate([
+            new ValueFixture('mask me'),
+            new ValueFixture('keep after mask'),
+            new ValueFixture('ignore me'),
+            new ValueFixture('keep after ignore'),
+        ], $context));
+
+        self::assertSame(['ValueFixture-1', 'ValueFixture-2', 'ValueFixture-4'], array_keys($objects));
+        self::assertEquals([
+            new ValueFixture('masked'),
+            new ValueFixture('keep after mask'),
+            new ValueFixture('keep after ignore'),
+        ], array_values($objects));
+
+        $source = new ValueFixture('keep in next run');
+        $secondRun = $this->loadFixtures($generator->generate($source, $context));
+        self::assertEquals($source, $secondRun['ValueFixture-1']);
+
+        $defaultGenerator = $builder->setMetadataHandler(new NonSpecificMetadataHandler())->build();
+        $defaultRun = $this->loadFixtures($defaultGenerator->generate($source, $context));
+        self::assertEquals($source, $defaultRun['ValueFixture-1']);
+    }
+
     public function testExportsStringableValuesAsLiteralText(): void
     {
         $source = new ValueFixture(new StringableText('@helpdesk'));
@@ -235,6 +391,43 @@ final class FixtureRoundTripTest extends FixtureTestCase
         self::assertSame(2, $calls);
     }
 
+    public function testReloadsDistinctObjectsWithTheSameShortClassName(): void
+    {
+        $other = new OtherWritablePropertyFixture();
+        $other->name = 'other';
+        $source = new ValueFixture([new WritablePropertyFixture('first'), $other]);
+
+        $objects = $this->loadFixtures($this->generate($source));
+        $root = $objects['ValueFixture-1'];
+        $first = $objects['WritablePropertyFixture-1'];
+        $second = $objects['WritablePropertyFixture-1-2'];
+
+        self::assertInstanceOf(ValueFixture::class, $root);
+        self::assertInstanceOf(WritablePropertyFixture::class, $first);
+        self::assertInstanceOf(OtherWritablePropertyFixture::class, $second);
+        self::assertSame([$first, $second], $root->value);
+    }
+
+    public function testDisambiguatesCustomNamesWithoutReusingDiscardedNames(): void
+    {
+        $generator = FixtureGeneratorBuilder::create()
+            ->setReferenceNamer(new CallbackNamer(
+                static fn (object $object, int $index): string => $index === 2 ? 'fixture-2' : 'fixture',
+            ))
+            ->build()
+        ;
+        $source = [
+            new ValueFixture(),
+            new ValueFixture('existing suffix'),
+            new ValueFixture('one'),
+            new ValueFixture('two'),
+        ];
+
+        $objects = $this->loadFixtures($generator->generate($source, FixtureGenerationContext::create()));
+
+        self::assertSame(['fixture-2', 'fixture-3', 'fixture-4'], array_keys($objects));
+    }
+
     public function testNestedGenerationKeepsItsOwnGraphAndRecursionLimit(): void
     {
         $child = new ValueFixture(['outer child', new ValueFixture('outside the outer limit')]);
@@ -276,6 +469,54 @@ final class FixtureRoundTripTest extends FixtureTestCase
         self::assertSame('inner', $inner['inner-1']->name);
     }
 
+    public function testBindsObjectConstraintsToEachRunsMetadataHandler(): void
+    {
+        $handler = new class() extends NonSpecificMetadataHandler {
+            public function getClass(object $object): string
+            {
+                return $object instanceof PropertyDiscoveryChildFixture
+                    ? PropertyDiscoveryParentFixture::class
+                    : parent::getClass($object);
+            }
+        };
+        $allowed = new PropertyDiscoveryChildFixture();
+        $allowed->inheritedPublic = 'allowed';
+        $excluded = new PropertyDiscoveryChildFixture();
+        $excluded->inheritedPublic = 'excluded';
+        $source = [$allowed, $excluded];
+        $context = FixtureGenerationContext::create()->addPersistedObjectConstraint($allowed);
+        $innerGenerator = FixtureGeneratorBuilder::create()->setMetadataHandler($handler)->build();
+        $innerFixture = '';
+
+        $outerGenerator = FixtureGeneratorBuilder::create()
+            ->setReferenceNamer(new CallbackNamer(static function (object $object, int $index) use (
+                $source,
+                $context,
+                $innerGenerator,
+                &$innerFixture,
+            ): string {
+                if ($index === 1) {
+                    $innerFixture = $innerGenerator->generate($source, $context);
+                }
+
+                return 'outer-' . $index;
+            }))
+            ->build()
+        ;
+        $outer = $this->loadFixtures($outerGenerator->generate($source, $context));
+        $inner = $this->loadFixtures($innerFixture);
+
+        self::assertSame(['outer-1'], array_keys($outer));
+        self::assertSame(['PropertyDiscoveryChildFixture-1'], array_keys($inner));
+        $outerObject = $outer['outer-1'];
+        $innerObject = $inner['PropertyDiscoveryChildFixture-1'];
+        self::assertInstanceOf(PropertyDiscoveryChildFixture::class, $outerObject);
+        self::assertSame(PropertyDiscoveryParentFixture::class, $innerObject::class);
+        self::assertSame('allowed', $outerObject->inheritedPublic);
+        self::assertSame('allowed', $innerObject->inheritedPublic);
+        self::assertFalse($context->getConstraintsCollection()->isAllowed($excluded));
+    }
+
     public function testSkipsAFixtureWhoseRequiredRelationIsOutsideTheRecursionLimit(): void
     {
         $source = new RequiredRelationFixture(new ValueFixture('related'), 'parent');
@@ -292,17 +533,17 @@ final class FixtureRoundTripTest extends FixtureTestCase
 
     public function testPrunesDependentFixturesWhenTheirReferencedParentIsSkipped(): void
     {
-        $parent = new UnwritableStateFixture();
-        $parent->replaceState(new ValueFixture(new ValueFixture($parent)));
+        $parent = new RequiredRelationFixture(new ValueFixture(), 'parent');
+        $parent->dependent = new ValueFixture(new ValueFixture($parent));
 
         $objects = $this->loadFixtures($this->generate([$parent, new WritablePropertyFixture('kept')]));
 
         self::assertSame(['WritablePropertyFixture-1'], array_keys($objects));
     }
 
-    public function testPrunesAnExplicitReferenceAndKeepsLiteralTextWithTheSameValue(): void
+    #[DataProvider('discardedReferenceExpressions')]
+    public function testPrunesAnExplicitReferenceAndKeepsLiteralTextWithTheSameValue(AliceExpression $reference): void
     {
-        $reference = AliceExpression::reference('UnwritableStateFixture-1');
         $context = FixtureGenerationContext::create()->addPropertyTransformRule(new PropertyTransformRule(
             new ClassPropertyMatcher(ValueFixture::class, 'value'),
             new SimpleValueTransformer($reference),
@@ -317,6 +558,12 @@ final class FixtureRoundTripTest extends FixtureTestCase
         self::assertSame(['WritablePropertyFixture-1'], array_keys($objects));
         self::assertInstanceOf(WritablePropertyFixture::class, $objects['WritablePropertyFixture-1']);
         self::assertSame($reference->syntax, $objects['WritablePropertyFixture-1']->name);
+    }
+
+    public static function discardedReferenceExpressions(): iterable
+    {
+        yield 'direct reference' => [AliceExpression::reference('UnwritableStateFixture-1')];
+        yield 'property reference' => [new AliceExpression('@UnwritableStateFixture-1->name')];
     }
 
     public function testExportsObjectsFromARootDoctrineCollection(): void
@@ -342,6 +589,90 @@ final class FixtureRoundTripTest extends FixtureTestCase
 
         self::assertInstanceOf(ValueFixture::class, $fixture);
         self::assertSame(['keep', 3, false, null], $fixture->value);
+    }
+
+    public function testCollectionLimitsControlCallbacksAndCountItemsBeforeTraversal(): void
+    {
+        $pruned = new WritablePropertyFixture('pruned by recursion');
+        $source = new ValueFixture(new ArrayCollection([
+            $pruned,
+            new WritablePropertyFixture('over the item class limit'),
+            'skip',
+            'keep',
+            'over the owner limit',
+        ]));
+        $callbackItems = [];
+        $context = FixtureGenerationContext::create()
+            ->setMaximumRecursion(0)
+            ->addCollectionItemLimitPerOwner(ValueFixture::class, 2)
+            ->addLimitForOwnerItemCollection(ValueFixture::class, WritablePropertyFixture::class, 1)
+            ->addCollectionItemSkipCondition(static function (string $owner, mixed $item) use (&$callbackItems): bool {
+                $callbackItems[] = [$owner, $item];
+
+                return $item === 'skip';
+            })
+        ;
+
+        $objects = $this->loadFixtures($this->generate($source, $context));
+        $fixture = $objects['ValueFixture-1'];
+
+        self::assertSame([
+            [ValueFixture::class, $pruned],
+            [ValueFixture::class, 'skip'],
+            [ValueFixture::class, 'keep'],
+        ], $callbackItems);
+        self::assertCount(1, $objects);
+        self::assertInstanceOf(ValueFixture::class, $fixture);
+        self::assertSame([1 => 'keep'], $fixture->value);
+    }
+
+    public function testOwnerLimitDoesNotApplyToPlainArraysOrRootCollections(): void
+    {
+        $context = FixtureGenerationContext::create()
+            ->addCollectionItemLimitPerOwner(ValueFixture::class, 0)
+            ->addCollectionItemSkipCondition(static function (): bool {
+                self::fail('The callback should not run for any of these items.');
+            })
+        ;
+        $objects = $this->loadFixtures($this->generate([
+            new ValueFixture(new ArrayCollection(['excluded'])),
+            new ValueFixture(['plain item']),
+            new ArrayCollection([new ValueFixture('root item')]),
+        ], $context));
+
+        self::assertSame(['ValueFixture-2', 'ValueFixture-3'], array_keys($objects));
+        self::assertInstanceOf(ValueFixture::class, $objects['ValueFixture-2']);
+        self::assertInstanceOf(ValueFixture::class, $objects['ValueFixture-3']);
+        self::assertSame(['plain item'], $objects['ValueFixture-2']->value);
+        self::assertSame('root item', $objects['ValueFixture-3']->value);
+    }
+
+    public function testCustomCollectionHandlerTakesPrecedenceOverBuiltInSelection(): void
+    {
+        $generator = FixtureGeneratorBuilder::create()
+            ->configureObjectHandlerRegistry(static function (ObjectHandlerRegistryInterface $registry): void {
+                $registry->registerHandlers([new class() implements ObjectHandlerInterface {
+                    public function handle(ValueContext $valueContext): bool
+                    {
+                        if (!$valueContext->getValue() instanceof ArrayCollection) {
+                            return false;
+                        }
+
+                        $valueContext->setSourceValue('handled by extension');
+
+                        return true;
+                    }
+                }]);
+            })
+            ->build()
+        ;
+        $context = FixtureGenerationContext::create()->addOwnersWithSkippedCollections(ValueFixture::class);
+        $source = new ValueFixture(new ArrayCollection(['excluded by built-in handler']));
+        $objects = $this->loadFixtures($generator->generate($source, $context));
+        $fixture = $objects['ValueFixture-1'];
+
+        self::assertInstanceOf(ValueFixture::class, $fixture);
+        self::assertSame('handled by extension', $fixture->value);
     }
 
     public function testUsesTheConstructorWhenArgumentsAreAvailableEvenIfBypassIsAllowed(): void
@@ -429,6 +760,48 @@ final class FixtureRoundTripTest extends FixtureTestCase
             ['name' => 'kept', 'state' => 'changed'],
             Yaml::parse($yaml)[UnwritableStateFixture::class]['UnwritableStateFixture-1']
         );
+    }
+
+    public function testUsesAnInitializedDefaultForARenamedConstructorArgument(): void
+    {
+        $generator = FixtureGeneratorBuilder::create()
+            ->setPropertyNamer(new class() implements PropertyNamerInterface {
+                public function createName(ValueContext $valueContext): string
+                {
+                    return 'needed';
+                }
+            })
+            ->build()
+        ;
+
+        $objects = $this->loadFixtures($generator->generate([
+            new RenamedConstructorFixture('seed'),
+            new RenamedConstructorFixture('changed'),
+        ], FixtureGenerationContext::create()));
+        $default = $objects['RenamedConstructorFixture-1'];
+        $changed = $objects['RenamedConstructorFixture-2'];
+
+        self::assertInstanceOf(RenamedConstructorFixture::class, $default);
+        self::assertInstanceOf(RenamedConstructorFixture::class, $changed);
+        self::assertSame('seed', $default->getLegacy());
+        self::assertSame('changed', $changed->getLegacy());
+    }
+
+    public function testVisitsAnUnwritableRelationOnlyWhenReachedThroughAnEmittedPath(): void
+    {
+        $child = new ValueFixture('child');
+        $owner = new UnwritableStateFixture();
+        $owner->name = 'owner';
+        $owner->replaceState($child);
+
+        $alone = $this->loadFixtures($this->generate($owner));
+        self::assertSame(['UnwritableStateFixture-1'], array_keys($alone));
+
+        $reachable = $this->loadFixtures($this->generate([$owner, new ValueFixture($child)]));
+        self::assertSame(['UnwritableStateFixture-1', 'ValueFixture-1', 'ValueFixture-2'], array_keys($reachable));
+        $root = $reachable['ValueFixture-1'];
+        self::assertInstanceOf(ValueFixture::class, $root);
+        self::assertSame($reachable['ValueFixture-2'], $root->value);
     }
 
     public function testExportsSetterCallsWhenConstructorArgumentsAreUnavailable(): void

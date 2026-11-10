@@ -11,9 +11,10 @@ class ValueContext
 {
     private bool $modified = false;
 
-    private bool $fixtureSyntax = false;
-
     private bool $skipped = false;
+
+    /** @var (\Closure(bool): bool)|null */
+    private ?\Closure $stringableWriteCheck = null;
 
     public function __construct(
         private mixed $value = null,
@@ -30,6 +31,22 @@ class ValueContext
         return $this->valueVisitor;
     }
 
+    /**
+     * @internal
+     * @param iterable<mixed> $collection
+     */
+    public function visitCollection(iterable $collection): bool
+    {
+        $visitor = $this->getValueVisitor();
+        if ($visitor === null) {
+            return false;
+        }
+
+        $visitor->visitCollection($this, $collection);
+
+        return true;
+    }
+
     public function getValue(): mixed
     {
         return AliceValueEncoder::unwrapExpressions($this->value);
@@ -41,12 +58,6 @@ class ValueContext
         return $this->value;
     }
 
-    /** @internal */
-    public function getFixtureValue(): mixed
-    {
-        return $this->fixtureSyntax ? AliceValueEncoder::markSyntax($this->value) : $this->value;
-    }
-
     public function setLiteralString(string $value): void
     {
         $this->setSourceValue($value);
@@ -54,7 +65,22 @@ class ValueContext
 
     public function allowsStringable(): bool
     {
-        return $this->allowsStringable;
+        return $this->allowsStringable || ($this->stringableWriteCheck !== null && ($this->stringableWriteCheck)(false));
+    }
+
+    /** @internal */
+    public function allowsStringableArrayItems(): bool
+    {
+        return $this->allowsStringable || ($this->stringableWriteCheck !== null && ($this->stringableWriteCheck)(true));
+    }
+
+    /**
+     * @internal
+     * @param \Closure(bool): bool $check
+     */
+    public function setStringableWriteCheck(\Closure $check): void
+    {
+        $this->stringableWriteCheck = $check;
     }
 
     /** Store a source value for encoding when the fixture is written. */
@@ -62,7 +88,6 @@ class ValueContext
     {
         $this->value = $value;
         $this->modified = true;
-        $this->fixtureSyntax = false;
 
         return $this;
     }
@@ -70,11 +95,10 @@ class ValueContext
     /** Store a fixture value that may already contain Alice syntax. */
     public function setValue(mixed $value, bool $setModified = true): static
     {
-        $this->value = $value;
         if ($setModified) {
             $this->modified = true;
         }
-        $this->fixtureSyntax = $this->modified;
+        $this->value = $this->modified ? AliceValueEncoder::markSyntax($value) : $value;
 
         return $this;
     }

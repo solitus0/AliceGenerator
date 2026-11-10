@@ -35,7 +35,7 @@ class FixtureWriteRouteResolver
         }
 
         if ($this->propertyAccessor->isWritable($object, $propertyName)) {
-            return ['type' => 'property'];
+            return ['type' => $this->hasStaticSetter($reflectionClass, $propertyName) ? 'skip' : 'property'];
         }
 
         $setterMethod = $this->findSetterMethod($reflectionClass, $propertyName);
@@ -65,17 +65,35 @@ class FixtureWriteRouteResolver
         return $methodName;
     }
 
+    private function hasStaticSetter(\ReflectionClass $reflectionClass, string $propertyName): bool
+    {
+        $camelized = str_replace(' ', '', ucwords(str_replace('_', ' ', $propertyName)));
+        foreach ([$camelized, ucfirst($propertyName)] as $name) {
+            $methodName = 'set' . $name;
+            if (!$reflectionClass->hasMethod($methodName)) {
+                continue;
+            }
+
+            $method = $reflectionClass->getMethod($methodName);
+            if ($method->isPublic() && $method->getNumberOfRequiredParameters() <= 1 && $method->getNumberOfParameters() > 0) {
+                return $method->isStatic();
+            }
+        }
+
+        return false;
+    }
+
     /**
      * @param array<int, array{position: int, property: string, value: mixed}> $constructorCandidates
+     * @param array<string, mixed> $writableProperties
      *
      * @return array<int, mixed>|null
      */
-    public function buildConstructorArguments(\ReflectionClass $reflectionClass, array $constructorCandidates): ?array
-    {
-        if ($constructorCandidates === []) {
-            return null;
-        }
-
+    public function buildConstructorArguments(
+        \ReflectionClass $reflectionClass,
+        array $constructorCandidates,
+        array $writableProperties = [],
+    ): ?array {
         $constructor = $reflectionClass->getConstructor();
         if ($constructor === null) {
             return null;
@@ -86,7 +104,11 @@ class FixtureWriteRouteResolver
             $candidatesByPosition[$candidate['position']] = $candidate['value'];
         }
 
-        $highestPosition = max(array_keys($candidatesByPosition));
+        $highestPosition = max([$constructor->getNumberOfRequiredParameters() - 1, ...array_keys($candidatesByPosition)]);
+        if ($highestPosition < 0) {
+            return null;
+        }
+
         $arguments = [];
 
         foreach ($constructor->getParameters() as $position => $parameter) {
@@ -96,6 +118,12 @@ class FixtureWriteRouteResolver
 
             if (array_key_exists($position, $candidatesByPosition)) {
                 $arguments[] = $candidatesByPosition[$position];
+
+                continue;
+            }
+
+            if (!$parameter->isOptional() && array_key_exists($parameter->getName(), $writableProperties)) {
+                $arguments[] = $writableProperties[$parameter->getName()];
 
                 continue;
             }

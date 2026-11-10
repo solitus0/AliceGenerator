@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Solitus0\AliceGenerator;
 
 use Solitus0\AliceGenerator\Exception\InvalidPropertyNameException;
+use Solitus0\AliceGenerator\Exception\UnavailableObjectException;
 use Solitus0\AliceGenerator\Exception\UnknownObjectTypeException;
 use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
 use Solitus0\AliceGenerator\Generator\FixtureWriteRouteResolver;
@@ -28,6 +29,9 @@ class ValueVisitor
 
     private array $results = [];
 
+    /** @var list<string> */
+    private array $discardedReferences = [];
+
     private int $recursionDepth = 0;
 
     public function __construct(
@@ -50,8 +54,9 @@ class ValueVisitor
     {
         $this->generationContext = $generationContext;
 
-        // Reset caches
+        $this->recursionDepth = 0;
         $this->results = [];
+        $this->discardedReferences = [];
         $this->objectCacheByClass = new ObjectCacheCollection($this->handler);
         $this->generationContext->getConstraintsCollection()->setMetadataHandler($this->handler);
         $this->transformRulesCollection = $this->generationContext->getTransformRulesCollection();
@@ -59,12 +64,39 @@ class ValueVisitor
 
     public function getResults(): array
     {
-        return $this->results;
+        if ($this->discardedReferences === []) {
+            return $this->results;
+        }
+
+        $results = $this->results;
+        $dependents = [];
+        foreach ($results as $class => $fixtures) {
+            foreach ($fixtures as $reference => $definition) {
+                array_walk_recursive($definition, static function (mixed $value) use (&$dependents, $class, $reference): void {
+                    if (is_string($value) && str_starts_with($value, '@')) {
+                        $dependents[$value][$reference] = $class;
+                    }
+                });
+            }
+        }
+
+        // Back-references can be written before the target's fixture is accepted.
+        $discarded = $this->discardedReferences;
+        while (($reference = array_pop($discarded)) !== null) {
+            foreach ($dependents['@' . $reference] ?? [] as $dependent => $class) {
+                if (isset($results[$class][$dependent])) {
+                    unset($results[$class][$dependent]);
+                    $discarded[] = $dependent;
+                }
+            }
+        }
+
+        return array_filter($results);
     }
 
     public function visitSimpleValue(mixed $value): ValueContext
     {
-        $valueContext = new ValueContext($value);
+        $valueContext = new ValueContext($value, valueVisitor: $this);
         $this->visitUnknownType($valueContext);
 
         return $valueContext;
@@ -137,6 +169,7 @@ class ValueVisitor
                         }
 
                         $this->objectCacheByClass->skip($object);
+                        $this->discardedReferences[] = $reference;
                         $valueContext->setSkipped(true);
 
                         return;
@@ -171,11 +204,17 @@ class ValueVisitor
     private function handlePersistedObject(object $object, string $reference): bool
     {
         $class = $this->handler->getClass($object);
-        $this->handler->preHandle($object);
+
+        try {
+            $this->handler->preHandle($object);
+        } catch (UnavailableObjectException) {
+            return false;
+        }
 
         $properties = [];
         $constructorCandidates = [];
         $setterCandidates = [];
+        $prunedGraphValue = false;
         $this->recursionDepth++;
 
         $reflectionClass = new \ReflectionClass($class);
@@ -205,6 +244,9 @@ class ValueVisitor
                 }
 
                 $this->visitUnknownType($valueContext);
+                if ($valueContext->isSkipped() && (is_object($value) || is_array($value))) {
+                    $prunedGraphValue = true;
+                }
             }
 
             if ($valueContext->isSkipped()) {
@@ -256,7 +298,8 @@ class ValueVisitor
 
         $constructorArguments = $this->fixtureWriteRouteResolver->buildConstructorArguments(
             $reflectionClass,
-            $constructorCandidates
+            $constructorCandidates,
+            $properties,
         );
         if ($constructorArguments !== null) {
             $saveValues['__construct'] = $constructorArguments;
@@ -278,6 +321,14 @@ class ValueVisitor
 
                 if (!$this->generationContext->shouldSkipNonWritableProperties()) {
                     $properties[$candidate['property']] = $candidate['value'];
+                }
+            }
+
+            if ($reflectionClass->getConstructor()?->getNumberOfRequiredParameters() > 0) {
+                if ($setterCandidates !== [] && $this->generationContext->allowsConstructorBypassFor($class)) {
+                    $saveValues['__construct'] = false;
+                } elseif ($prunedGraphValue) {
+                    return false;
                 }
             }
         }

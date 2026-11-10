@@ -24,6 +24,9 @@ class FixtureGenerationContext
      */
     private bool $skipNonWritableProperties = true;
 
+    /** @var array<class-string, true> */
+    private array $constructorBypassClasses = [];
+
     /**
      * @var callable[] Callbacks to skip specific collection items.
      * Each callback must have the signature: function(string $ownerClass, mixed $item): bool
@@ -221,6 +224,20 @@ class FixtureGenerationContext
         $this->skipNonWritableProperties = $skipNonWritableProperties;
 
         return $this;
+    }
+
+    /** @param class-string $class */
+    public function allowConstructorBypassFor(string $class): static
+    {
+        $this->constructorBypassClasses[$class] = true;
+
+        return $this;
+    }
+
+    /** @param class-string $class */
+    public function allowsConstructorBypassFor(string $class): bool
+    {
+        return isset($this->constructorBypassClasses[$class]);
     }
 
     public function getTransformRulesCollection(): PropertyTransformRulesCollection

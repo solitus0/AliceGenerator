@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Solitus0\AliceGenerator\MetadataHandler;
 
+use Solitus0\AliceGenerator\Exception\UnavailableObjectException;
 use Solitus0\AliceGenerator\ValueContext;
 
 interface MetadataHandlerInterface
@@ -20,6 +21,8 @@ interface MetadataHandlerInterface
 
     /**
      * Preprocess the object before fixture extraction (e.g. load proxies).
+     *
+     * @throws UnavailableObjectException to skip an object that no longer exists
      */
     public function preHandle(object $object): void;
 

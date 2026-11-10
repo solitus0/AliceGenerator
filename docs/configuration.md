@@ -109,7 +109,7 @@ By default, the generator prefers constructor routing for constructor-backed pri
 
 For values that are not PropertyAccessor-writable, the generator tries these routes in order:
 - matching constructor parameters are emitted under `__construct`
-- matching public setters are emitted under `__calls`
+- matching public instance setters are emitted under `__calls`
 
 If no safe property, constructor, or setter route can be derived, non-writable values are skipped during fixture generation.
 
@@ -132,6 +132,19 @@ App\Security\ApiAuthentication\Entity\ApiKey:
         createdAt: '<(new \DateTime("2024-01-01 00:00:00", new \DateTimeZone("UTC")))>'
 ```
 
+### Setter Fallback
+
+If Alice needs to instantiate a class whose required constructor arguments are unavailable, opt in to constructor
+bypass for that class when its setters can restore its state.
+
+```php
+$context = FixtureGenerationContext::create()
+    ->allowConstructorBypassFor(SetterBackedRecord::class);
+```
+
+When generation falls back to setters for that class, Alice allocates the object without calling its constructor
+and applies the emitted setter calls.
+
 ### Output Format
 
 Fixtures are generated in YAML by default. To output PHP code or a custom format:
@@ -148,6 +161,10 @@ $code = $generator->generate($objects, FixtureGenerationContext::create());
 ```
 
 ### Recursion Control
+
+When traversal removes a value needed by a required constructor argument, generation omits the incomplete fixture
+and fixtures that reference it. Classes configured for setter fallback can still be reconstructed when their setters
+provide the required state.
 
 ### Legend
 

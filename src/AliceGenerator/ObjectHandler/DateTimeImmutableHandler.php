@@ -16,24 +16,11 @@ class DateTimeImmutableHandler implements ObjectHandlerInterface
             return false;
         }
 
-        $formatted = $value->format('Y-m-d H:i:s');
-
-        if (str_contains($formatted, ' 00:00:00')) {
-            $valueContext->setValue(
-                sprintf(
-                    '<(new \DateTimeImmutable("%s"))>',
-                    str_replace(' 00:00:00', '', $formatted)
-                )
-            );
-        } else {
-            $valueContext->setValue(
-                sprintf(
-                    '<(new \DateTimeImmutable("%s", new \DateTimeZone("%s")))>',
-                    $formatted,
-                    $value->getTimezone()->getName()
-                )
-            );
-        }
+        $valueContext->setValue(sprintf(
+            '<(new \DateTimeImmutable("%s", new \DateTimeZone("%s")))>',
+            $value->format('Y-m-d H:i:s.u'),
+            $value->getTimezone()->getName(),
+        ));
 
         return true;
     }

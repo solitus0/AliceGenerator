@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Solitus0\AliceGenerator\Tests;
+namespace Solitus0\AliceGenerator\Tests\Generator\Fixtures;
 
 final class MixedRoutingFixture
 {
@@ -15,7 +15,7 @@ final class MixedRoutingFixture
     public function __construct(
         string $identifier,
         string $name,
-        string $value
+        string $value = 'draft'
     ) {
         $this->identifier = $identifier;
         $this->name = $name;

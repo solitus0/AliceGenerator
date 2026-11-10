@@ -30,20 +30,21 @@ class ValueContext
     {
         if (!$this->modified && is_string($this->value)) {
             $s = $this->value;
+            $containsMarkup = $s !== strip_tags($s);
 
-            // if string is raw html or xml prevent alice to interpret as evaluated expression
-            if ($s !== strip_tags($s)) {
-                //replace new lines before encoding Alice’s function argument parser treats newlines as separators
-                $s = str_replace("\n", '', $s);
-                // Step 1: escape HTML special chars (<, >, ", ')
+            // Alice consumes escape markers and splits function arguments at literal newlines.
+            if (str_contains($s, '\@') || str_contains($s, '\$') || ($containsMarkup && strpbrk($s, "\r\n") !== false)) {
+                return "<base64_decode('" . base64_encode($s) . "')>";
+            }
+
+            if ($containsMarkup) {
                 $s = htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 
-                // Step 2: revert inside Alice expression at runtime
                 return "<htmlspecialchars_decode('$s', 3)>";
             }
 
-            // Alice tokenizes any literal $... fragment as a variable reference, so escape every unescaped dollar sign.
-            return preg_replace('/(?<!\\\\)\$/', '\\\\$', $s);
+            // Escape literal markers Alice could interpret as fixture or variable references.
+            return str_replace(['@', '$'], ['\@', '\$'], $s);
         }
 
         return $this->value;

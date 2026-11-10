@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
-namespace Solitus0\AliceGenerator\Tests;
+namespace Solitus0\AliceGenerator\Tests\Generator\Fixtures;
 
 final class SetterOnlyFixture
 {
     private string $status;
 
     public function __construct(
-        string $value
+        string $value = 'draft'
     ) {
         $this->status = $value;
     }

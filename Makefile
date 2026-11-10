@@ -10,6 +10,10 @@ rector:
 test:
 	APP_ENV=test php -d xdebug.mode=off -d memory_limit=-1 vendor/bin/phpunit --configuration ./phpunit.xml.dist --no-coverage
 
+test_coverage:
+	APP_ENV=test php -d xdebug.mode=coverage -d memory_limit=-1 vendor/bin/phpunit \
+		--coverage-filter src --path-coverage --coverage-text --coverage-html var/coverage
+
 phpstan:
 	mkdir -p ./var/phpstan
 	php -d memory_limit=1G vendor/bin/phpstan analyse -c phpstan.dist.neon --error-format gitlab > ./var/phpstan/phpstan-report.json

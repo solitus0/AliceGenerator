@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Solitus0\AliceGenerator\MetadataHandler;
 
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\EntityNotFoundException;
 use Doctrine\ORM\Mapping\ClassMetadata as ORMClassMetadata;
 use Doctrine\Persistence\Mapping\ClassMetadata;
+use Solitus0\AliceGenerator\Exception\UnavailableObjectException;
 use Solitus0\AliceGenerator\ValueContext;
 
 class DoctrineMetadataHandler extends AbstractMetadataHandler
@@ -34,13 +36,12 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
 
     public function preHandle(object $object): void
     {
-        // Force proxy objects to load data
-        if (method_exists($object, '__load')) {
-            try {
-                $object->__load();
-            } catch (\Throwable) {
-                // ignore proxy load failures
-            }
+        try {
+            $this->entityManager->initializeObject($object);
+        } catch (EntityNotFoundException $exception) {
+            throw new UnavailableObjectException($exception->getMessage(), 0, $exception);
+        } catch (\Throwable) {
+            // Preserve the existing handling of other proxy load failures.
         }
     }
 

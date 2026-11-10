@@ -36,7 +36,7 @@ class ObjectCacheCollection extends AbstractCollection
         $collection = $this->getValidCollection($object);
         $collection->add($object);
 
-        return $collection->count();
+        return array_key_last($collection->toArray()) + 1;
     }
 
     private function getSkippedCollection(object $object): ArrayCollection

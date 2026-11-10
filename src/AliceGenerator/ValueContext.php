@@ -17,9 +17,6 @@ class ValueContext
     /** @var (\Closure(bool): StringableWriteMode)|StringableWriteMode|null */
     private \Closure|StringableWriteMode|null $stringableWriteMode = null;
 
-    /** @var (\Closure(list<mixed>): void)|null */
-    private ?\Closure $selectedCollectionVisitor = null;
-
     public function __construct(
         private mixed $value = null,
         private readonly ?string $contextObjectClass = null,
@@ -49,32 +46,6 @@ class ValueContext
         $visitor->visitCollection($this, $collection);
 
         return true;
-    }
-
-    /**
-     * @internal
-     * @param \Closure(list<mixed>): void $visitSelected
-     * @param \Closure(): void $visit
-     */
-    public function withSelectedCollectionVisitor(\Closure $visitSelected, \Closure $visit): void
-    {
-        $previousVisitor = $this->selectedCollectionVisitor;
-        $this->selectedCollectionVisitor = $visitSelected;
-
-        try {
-            $visit();
-        } finally {
-            $this->selectedCollectionVisitor = $previousVisitor;
-        }
-    }
-
-    /**
-     * @internal
-     * @return (\Closure(list<mixed>): void)|null
-     */
-    public function getSelectedCollectionVisitor(): ?\Closure
-    {
-        return $this->selectedCollectionVisitor;
     }
 
     public function getValue(): mixed

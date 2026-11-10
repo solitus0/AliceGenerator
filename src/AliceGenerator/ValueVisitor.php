@@ -4,10 +4,9 @@ declare(strict_types=1);
 
 namespace Solitus0\AliceGenerator;
 
-use Doctrine\Common\Collections\Collection;
 use Solitus0\AliceGenerator\Exception\UnavailableObjectException;
 use Solitus0\AliceGenerator\Exception\UnknownObjectTypeException;
-use Solitus0\AliceGenerator\Generator\CollectionSelection;
+use Solitus0\AliceGenerator\Generator\CollectionRouting;
 use Solitus0\AliceGenerator\Generator\DeferredStringable;
 use Solitus0\AliceGenerator\Generator\FinalizedFixtureWrites;
 use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
@@ -31,6 +30,8 @@ class ValueVisitor
 {
     private FixtureGraph $graph;
 
+    private CollectionRouting $collections;
+
     private array $completedResults = [];
 
     public function __construct(
@@ -53,6 +54,12 @@ class ValueVisitor
     {
         $this->completedResults = [];
         $this->graph = new FixtureGraph($generationContext, $this->handler, $this->referenceNamer);
+        $this->collections = new CollectionRouting(
+            $this->graph,
+            $this->handler instanceof MetadataExportPolicyInterface ? $this->handler : null,
+            fn (ValueContext $context) => $this->visitValue($context, preserveEmptyArrays: false),
+            $this->visitArray(...),
+        );
     }
 
     /** @internal */
@@ -74,7 +81,7 @@ class ValueVisitor
             return $traversal->completedResults;
         } finally {
             // Extension callbacks can retain the run's visitor for access to its results.
-            unset($traversal->graph);
+            unset($traversal->collections, $traversal->graph);
         }
     }
 
@@ -156,55 +163,7 @@ class ValueVisitor
      */
     public function visitCollection(ValueContext $valueContext, iterable $collection): void
     {
-        $items = CollectionSelection::select(
-            $collection,
-            $valueContext->getContextObjectClass(),
-            $this->getGenerationContext(),
-        );
-        if ($items === null) {
-            $valueContext->setSkipped(true);
-
-            return;
-        }
-
-        $valueContext->setSourceValue($items);
-        $visitSelected = $valueContext->getSelectedCollectionVisitor();
-        if ($visitSelected !== null) {
-            $visitSelected($items);
-
-            return;
-        }
-
-        $this->visitArray($valueContext);
-    }
-
-    private function visitUnwritableCollection(ValueContext $valueContext, ?string $adderItemType): bool
-    {
-        if ($adderItemType === null) {
-            $this->discoverInverseCollection($valueContext);
-
-            return false;
-        }
-
-        $useAdder = false;
-        $valueContext->withSelectedCollectionVisitor(
-            function (array $items) use ($valueContext, $adderItemType, &$useAdder): void {
-                foreach ($items as $item) {
-                    if (!is_object($item) || !is_a($item, $adderItemType)) {
-                        $useAdder = false;
-                        $this->discoverInverseCollection($valueContext);
-
-                        return;
-                    }
-                }
-
-                $useAdder = true;
-                $this->visitArray($valueContext);
-            },
-            fn () => $this->visitValue($valueContext, preserveEmptyArrays: false),
-        );
-
-        return $useAdder;
+        $this->collections->visitCollection($valueContext, $collection, $this->getGenerationContext());
     }
 
     private function visitArrayValue(ValueContext $valueContext, bool $preserveEmptyArrays): void
@@ -232,26 +191,6 @@ class ValueVisitor
             $valueContext->setSkipped(true);
         } else {
             $valueContext->setSourceValue($items);
-        }
-    }
-
-    private function discoverInverseCollection(ValueContext $valueContext): void
-    {
-        $owner = $valueContext->getContextObject();
-        $collection = $valueContext->getUnencodedValue();
-        if (!$this->handler instanceof MetadataExportPolicyInterface || $owner === null
-            || (!$collection instanceof Collection && !is_array($collection))
-        ) {
-            return;
-        }
-
-        $owningField = $this->handler->findOwningFieldForInverseCollection($owner, $valueContext->getPropName());
-        if ($owningField !== null) {
-            $this->graph->discoverInverseCollection($owner, $owningField, function () use ($valueContext): mixed {
-                $this->visitValue($valueContext, preserveEmptyArrays: false);
-
-                return $valueContext->isSkipped() ? null : $valueContext->getUnencodedValue();
-            });
         }
     }
 
@@ -338,14 +277,13 @@ class ValueVisitor
         $policy = $this->getGenerationContext()->getGenerationPolicy();
         $selectedValues = $policy->selectedValuesFor($object);
         $visitProperty = $this->visitValue(...);
-        $visitUnwritableCollection = $this->visitUnwritableCollection(...);
 
         foreach ($this->classMetadataProvider->getPropertyMetadata($reflectionClass) as $metadata) {
             $property = $selectedValues === null
                 ? $this->prepareProperty($object, $class, $newObject, $metadata, $hasRequiredConstructorArguments)
                 : $policy->prepareSelectedProperty($selectedValues, $metadata, $object, $class, $this);
             if ($property !== null) {
-                $writePlan->addProperty($property, $visitProperty, $visitUnwritableCollection);
+                $writePlan->addProperty($property, $visitProperty, $this->collections);
             }
         }
 

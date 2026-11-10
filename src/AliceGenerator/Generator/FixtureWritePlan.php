@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Solitus0\AliceGenerator\Generator;
 
-use Doctrine\Common\Collections\Collection;
 use Solitus0\AliceGenerator\AliceExpression;
 use Solitus0\AliceGenerator\Exception\InvalidPropertyNameException;
 use Solitus0\AliceGenerator\ValueContext;
@@ -56,14 +55,11 @@ final class FixtureWritePlan
         return false;
     }
 
-    /**
-     * @param \Closure(ValueContext, bool): void $visit
-     * @param \Closure(ValueContext, string|null): bool $visitUnwritableCollection
-     */
+    /** @param \Closure(ValueContext, bool): void $visit */
     public function addProperty(
         PreparedProperty $property,
         \Closure $visit,
-        \Closure $visitUnwritableCollection,
+        CollectionRouting $collections,
     ): void {
         $reflectionProperty = $property->reflection;
         $propertyName = $property->name;
@@ -81,7 +77,10 @@ final class FixtureWritePlan
         $route = $this->resolver->resolve($this->object, $this->reflectionClass, $reflectionProperty, $propertyName);
         if ($route['type'] === 'skip' && $this->generationContext->shouldSkipNonWritableProperties()) {
             if (!$constructorOnly && $property->needsTraversal) {
-                $this->planUnwritableCollection($propertyName, $valueContext, $visitUnwritableCollection);
+                $adder = $collections->routeUnwritable($property, $this->reflectionClass, $this->resolver);
+                foreach ($adder['arguments'] ?? [] as $argument) {
+                    $this->setterCandidates[] = ['method' => $adder['method'], 'source' => null, 'value' => $argument];
+                }
             }
 
             return;
@@ -164,25 +163,6 @@ final class FixtureWritePlan
         $this->hasDeferredStringables = $this->hasDeferredStringables || $mode->dependsOnConstructor();
 
         return $mode;
-    }
-
-    /** @param \Closure(ValueContext, string|null): bool $visit */
-    private function planUnwritableCollection(string $propertyName, ValueContext $valueContext, \Closure $visit): void
-    {
-        $collection = $valueContext->getUnencodedValue();
-        $adder = $collection instanceof Collection
-            ? $this->resolver->findCollectionAdder($this->reflectionClass, $propertyName)
-            : null;
-        if (!$visit($valueContext, $adder['itemType'] ?? null) || $adder === null || $valueContext->isSkipped()) {
-            return;
-        }
-
-        $arguments = $valueContext->getUnencodedValue();
-        if (is_array($arguments)) {
-            foreach ($arguments as $argument) {
-                $this->setterCandidates[] = ['method' => $adder['method'], 'source' => null, 'value' => $argument];
-            }
-        }
     }
 
     public function buildDefinition(string $class): ?FinalizedFixtureWrites

@@ -1,71 +1,56 @@
-# Custom Object Handlers
+# Custom object handlers
 
-AliceGenerator uses object handlers to transform specific object types (e.g., DateTime, UUIDs)
-into fixture-ready values. You can implement custom handlers to support any domain-specific type.
+The builder registers handlers for Doctrine collections, `DateTime`, `DateTimeImmutable`, and PHP enums.
+After these handlers, the generator can convert a nested `Stringable` object to literal text if the metadata
+policy allows it and the destination accepts text. The Doctrine handler keeps mapped objects as fixtures.
+Register a handler when a value object needs a specific reconstruction expression.
 
-## Built-in Handlers
+## Register a handler
 
-By default, AliceGenerator registers handlers for:
+A handler receives a `ValueContext`. Return `false` to let the next handler try or `true` after setting or
+skipping the value. Newly registered handlers run first and can override the built-in handlers.
 
-- `CollectionHandler` for Doctrine collections
-- `DateTimeHandler` for `\DateTime`
-- `DateTimeImmutableHandler` for `\DateTimeImmutable`
-- `EnumHandler` for PHP enums
-
-After registered handlers run, AliceGenerator can export an unmapped nested value with `__toString()`
-as literal text. The write that will be emitted determines whether the value can be converted, including when a
-setter takes over for an unavailable constructor argument. Mapped objects and root objects retain their fixture
-identity. Register a custom handler for value objects that need a specific reconstruction expression.
-
-## Implementing a Custom Handler
-
-To add support for a custom type, create a class that implements `ObjectHandlerInterface`:
+This handler reconstructs a `DateTimeZone` when Alice loads the fixture:
 
 ```php
-namespace App\Alice\ObjectHandler;
-
+use Solitus0\AliceGenerator\AliceExpression;
+use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
 use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerInterface;
+use Solitus0\AliceGenerator\ObjectHandler\ObjectHandlerRegistryInterface;
 use Solitus0\AliceGenerator\ValueContext;
-use libphonenumber\PhoneNumber;
-use libphonenumber\PhoneNumberFormat;
-use libphonenumber\PhoneNumberUtil;
 
-class PhoneNumberHandler implements ObjectHandlerInterface
+final class DateTimeZoneHandler implements ObjectHandlerInterface
 {
     public function handle(ValueContext $context): bool
     {
         $value = $context->getValue();
-        if (!$value instanceof PhoneNumber) {
+        if (!$value instanceof \DateTimeZone) {
             return false;
         }
 
-        $formatted = PhoneNumberUtil::getInstance()
-            ->format($value, PhoneNumberFormat::E164);
-
-        $context->setValue(sprintf('<phone(%s)>', $formatted));
+        $expression = sprintf('<(new \DateTimeZone(%s))>', var_export($value->getName(), true));
+        $context->setSourceValue(new AliceExpression($expression));
 
         return true;
     }
 }
-```
-
-## Registering the Handler
-
-When building your fixture generator, register the handler via the `configureObjectHandlerRegistry()` callback:
-
-```php
-use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
-use App\Alice\ObjectHandler\PhoneNumberHandler;
 
 $generator = FixtureGeneratorBuilder::create()
-    ->configureObjectHandlerRegistry(function ($registry) {
-        $registry->registerHandler(new PhoneNumberHandler());
+    ->configureObjectHandlerRegistry(static function (ObjectHandlerRegistryInterface $registry): void {
+        $registry->registerHandler(new DateTimeZoneHandler());
     })
     ->build();
 ```
 
-## Handler Contract
+For a `Schedule` whose public `timeZone` property is set to `new \DateTimeZone('Europe/Vilnius')`, the generator emits
+an Alice expression that reconstructs the value.
 
-- Returning `true` from `handle()` stops further processing and accepts the transformed value.
-- Returning `false` allows the next registered handler to attempt processing.
-- Use `setSourceValue()` for literal data and `setValue()` for fixture-ready Alice syntax.
+```yaml
+Schedule:
+    Schedule-1:
+        timeZone: "<(new \\DateTimeZone('Europe/Vilnius'))>"
+```
+
+Use `setSourceValue()` for literal data and wrap deliberate Alice syntax in `AliceExpression`.
+`setValue()` accepts fixture-ready syntax, including strings inside arrays. Use it only when those strings
+should be interpreted by Alice.

@@ -1,6 +1,6 @@
 {
     "name": "solitus0/alice-generator",
-    "description": "Recursively generate Alice fixtures from existing objects",
+    "description": "Export existing PHP objects and Doctrine entities as reusable Alice fixtures",
     "keywords": [
         "alice",
         "fixture",

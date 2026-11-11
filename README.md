@@ -2,33 +2,42 @@
 
 [![Packagist Version](https://img.shields.io/packagist/v/solitus0/alice-generator.svg)](https://packagist.org/packages/solitus0/alice-generator) [![License](https://img.shields.io/github/license/solitus0/AliceGenerator.svg?style=flat-square)](LICENSE)
 
-AliceGenerator is a PHP library that generates realistic Alice fixtures from your existing database.
-It integrates seamlessly with Doctrine and provides flexible customization options for naming strategies,
-object handlers, and generation contexts.
+AliceGenerator is a PHP 8.1+ library that exports existing objects, including Doctrine entities, as reusable Alice fixtures.
+It preserves shared objects and cycles as named references in the generated YAML.
 
-> **Note**: This library is a **hard fork** of [trappar/AliceGenerator](https://github.com/trappar/AliceGenerator),
-redesigned and maintained independently by [solitus0](https://github.com/solitus0).
+Generating fixtures from records created through your application's workflows saves time and gives you realistic test data that reflects your business rules and preserves relationships between records.
+
+![A database feeds the orange Task-1 tile into fixtures.yaml. Both tasks reference Assignee-1. The Nelmio robot stands beside the file.](./docs/images/alice-generator-hero.webp)
+
+## Quick start
+
+```sh
+composer require solitus0/alice-generator --dev
+```
+
+Run the [PHP quick start](./docs/getting-started.md#quick-start) to export two tasks that share one assignee. Both tasks reference the same fixture in the generated YAML.
+
+```yaml
+Assignee:
+    Assignee-1:
+        name: Alex
+Task:
+    Task-1:
+        title: 'Send invoice'
+        assignee: '@Assignee-1'
+    Task-2:
+        title: Review
+        assignee: '@Assignee-1'
+```
 
 ## Documentation
 
-Detailed guides are available:
+- [Usage](./docs/usage.md) covers recursion, object constraints, and collection filters.
+- [Configuration](./docs/configuration.md) covers Doctrine, naming, how fixtures are written, and output formats.
+- [Property transformers](./docs/property-transformers.md) replace or redact field values.
+- [Custom object handlers](./docs/custom-object-handlers.md) support value objects that need custom serialization.
+- [Recipe-based export](./docs/fixture-export.md) selects records and fields and validates the YAML before writing it. The `alice-export` command is **unreleased**.
+- [Changelog](./CHANGELOG.md) lists features and migration notes by release.
 
-- [Getting Started](./docs/getting-started.md)
-- [Usage](./docs/usage.md)
-- [Configuration](./docs/configuration.md)
-- [Custom Object Handlers](./docs/custom-object-handlers.md)
-- [Property Transformers](./docs/property-transformers.md)
-- [Recipe-based fixture export](./docs/fixture-export.md)
-- [Changelog](./CHANGELOG.md)
-
-## Features
-
-- Native Doctrine integration via `DoctrineMetadataHandler`
-- Customizable property namers and reference namers
-- Pluggable object handlers for custom types
-- Fine-grained control over recursion and collection handling
-- Data sanitation via property transformers
-
-## License
-
-This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
+AliceGenerator is an independently maintained fork of [trappar/AliceGenerator](https://github.com/trappar/AliceGenerator).
+It is released under the [MIT License](LICENSE).

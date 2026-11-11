@@ -1,265 +1,91 @@
 # Configuration
 
-AliceGenerator provides a comprehensive set of configuration options to tailor fixture generation.
+Configure the generator with `FixtureGeneratorBuilder`. Use a [generation context](usage.md) for settings that vary by export,
+such as traversal depth, collection filters, and [property transformations](property-transformers.md).
 
-## Generator Setup
+## Doctrine integration
 
-### Doctrine Integration
-
-To integrate with Doctrine and leverage entity metadata and proxies:
+Use your application's entity manager and pass an existing entity to the generator:
 
 ```php
+use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
 use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
 use Solitus0\AliceGenerator\MetadataHandler\DoctrineMetadataHandler;
 
 $generator = FixtureGeneratorBuilder::create()
     ->setMetadataHandler(new DoctrineMetadataHandler($entityManager))
     ->build();
+
+$yaml = $generator->generate($entity, FixtureGenerationContext::create());
 ```
 
-The `DoctrineMetadataHandler` automatically:
-- Excludes identifiers and unmapped properties from fixtures
-- Handles Doctrine proxy objects
-- Uses Doctrine metadata to process mapped entities
+The handler initializes lazy entities and uses Doctrine mapping to select fields, associations, and embeddables.
+An unavailable related entity is omitted. Traversing lazy associations may query the database.
 
-Custom metadata handlers can implement `MetadataExportPolicyInterface` to choose how objects are represented
-and identify the owning field for inverse collections. The generator still checks whether the selected write route
-accepts text before converting a `Stringable` value. Handlers that implement `MetadataHandlerInterface` alone
-continue to use `canHandle()` to identify objects that should be exported as fixtures.
+| Constructor option | Default behavior |
+| --- | --- |
+| `skipIdentifiers: true` | Omit generated single-field identifiers and single-field identifiers with recognized UUID or ULID mappings. Retain composite identifiers and other assigned identifiers. |
+| `skipEmptyStrings: true` | Omit empty or whitespace-only strings from nullable mapped fields. |
 
-## Naming Strategies
+Pass `false` for either option to keep those values. The default builder uses reflection without Doctrine metadata.
+Use the Doctrine handler for mapped root entities. For other root objects, use the default handler or supply a custom one.
 
-Customize property and reference naming for your fixtures.
+## Naming
 
-### Property Namer
+The default property namer uses the source property name. A custom `PropertyNamerInterface` supplied through
+`setPropertyNamer()` sees the value after any metadata override or matching transformer. The emitted name is
+used to match the destination property, constructor parameter, or setter, so verify that renamed fields reload.
 
-By default, fixture property names match object properties. To use a custom property namer:
+The default `ClassNamer` uses the short class name and a one-based per-class index, such as `Task-1`.
+Repeated visits to an object reuse its name during a run. Colliding names receive a numeric suffix, and names
+reserved for omitted fixtures are not reused in that run.
 
 ```php
 use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
-use App\Alice\Naming\CustomPropertyNamer;
-
-$generator = FixtureGeneratorBuilder::create()
-    ->setPropertyNamer(new CustomPropertyNamer())
-    ->build();
-```
-
-The property namer sees the value after metadata overrides or the first matching property transformer. This includes
-initialized defaults that could supply a required constructor argument. The emitted name guides write routing before
-recursive traversal converts object values to fixture references.
-
-### Reference Namer
-
-Reference keys used in generated fixtures (e.g., `@User-1`) are created by a **Reference Namer**.
-Each object gets one reference name per generation run. Repeated visits reuse that name.
-If different objects request the same name, later objects receive an unused numeric suffix such as
-`User-1-2`. Names reserved for skipped objects also stay reserved for the rest of the run.
-
-You can configure a custom reference namer on the fixture generator builder:
-
----
-
-#### Available Reference Namers
-
-- **`ClassNamer`** *(default)*  
-  Generates references based on the object's class name and a numeric index, with optional offset.
-
-**Constructor:**
-```php
-public function __construct(int $referenceOffset = 0)
-```
-
-**Example:**
-```php
-use Solitus0\AliceGenerator\ReferenceNamer\ClassNamer;
-
-// Creates references like @User-101, @Product-101
-$namer = new ClassNamer(referenceOffset: 100);
-
-$generator = FixtureGeneratorBuilder::create()
-    ->setReferenceNamer($namer)
-    ->build();
-```
----
-
-- **`CallbackNamer`**  
-  Fully customizable reference generation via a user-provided closure, with optional offset.
-
-**Constructor:**
-```php
-public function __construct(\Closure $callback, int $referenceOffset = 0)
-```
-
-**Example:**
-```php
 use Solitus0\AliceGenerator\ReferenceNamer\CallbackNamer;
 
-// Creates references like @User-example@example.com
 $namer = new CallbackNamer(
-    callback: static function (object $obj, int $index): string {
-        $short = (new \ReflectionClass($obj))->getShortName();
-        if ($obj instanceof EmailAwareInterface) {
-            return sprintf('%s-%s', $short, $obj->getEmail());
-        }
-
-        // Fallback: Short class name + index, e.g. "@User-1"
-        return sprintf('%s-%d', $short, $index);
-    }
+    static fn (object $object, int $index): string =>
+        strtolower((new \ReflectionClass($object))->getShortName()) . '-' . $index
 );
 
-$generator = FixtureGeneratorBuilder::create()
-    ->setReferenceNamer($namer)
-    ->build();
+$generator = FixtureGeneratorBuilder::create()->setReferenceNamer($namer)->build();
 ```
 
----
-## Fixture generation context
+Return a fixture key such as `task-1`. AliceGenerator adds the `@` when emitting a reference to it.
+Both `ClassNamer` and `CallbackNamer` accept a `referenceOffset` added to the per-class index.
 
-### Skipping Non-Writable Properties
+## How fixtures are written
 
-By default, the generator prefers constructor routing for constructor-backed private state, and otherwise falls back to normal Alice property assignment whenever Symfony's PropertyAccessor can write the value safely. That keeps constructor-only DTOs valid while preserving hydration order for regular setter-backed entities whose child fixtures depend on those values during graph construction.
+| When the value can be restored through | Generated fixture |
+| --- | --- |
+| Direct assignment | A normal Alice field. |
+| A matching constructor parameter | An argument in `__construct`. A writable field or initialized default can also supply a required argument. |
+| An explicit public instance setter | A setter call in `__calls`. |
+| A supported collection adder | One adder call per item in `__calls`. |
+| A Doctrine child's owning to-one field | The relationship is written on the child. The parent's inverse collection can still be used to discover children. |
+| No supported route | The property is omitted by default. |
 
-For values that are not PropertyAccessor-writable, the generator tries these routes in order:
-- matching constructor parameters are emitted under `__construct`
-- matching public instance setters are emitted under `__calls`
-- a Doctrine collection with exact-name public instance add and remove methods accepting the same object type can
-  emit one adder call per selected item under `__calls`. The calls append to the collection initialized by the constructor.
+Collection adder calls require a public instance adder and remover with the same object parameter type.
+For `items`, use `addItems` and `removeItems`. The adder appends to the collection initialized by the constructor.
 
-If no safe write route can be derived, non-writable values are skipped during fixture generation.
+Set `setSkipNonWritableProperties(false)` on the context to emit raw fields where possible. Reload those
+fixtures with your Alice configuration to check that it can write them.
 
-With Doctrine metadata, an unwritable inverse one-to-many collection can still discover children. The generated
-fixtures restore the relationship through each child's owning association and omit the parent collection field.
+For a class whose required constructor arguments are unavailable, call
+`$context->allowConstructorBypassFor(SetterBackedRecord::class)` when its setters can restore the needed state.
+If generation uses that fallback, it emits `__construct: false` so Alice allocates the object before calling its setters.
 
-If you want to include such properties, you can disable this behavior by setting the skipNonWritableProperties flag to false in the context:
+## Output format
 
-```php
-$context = FixtureGenerationContext::create()
-    ->setSkipNonWritableProperties(false);
-```
+The default is YAML. Use `setGenerator()` to change it:
 
-Example generated output:
+- `new YamlGenerator(inline: 3, indent: 4)` matches the default YAML formatting.
+- `new PhpGenerator()` returns PHP source that returns the fixture definitions as an array when included.
+- Implement `GeneratorInterface` to serialize the fixture definitions to another string format.
 
-```yaml
-App\Security\ApiAuthentication\Entity\ApiKey:
-    ApiKey-CommandRunner:
-        __construct:
-            - 'token'
-            - 'command_runner'
-            - ['ROLE_COMMAND_RUNNER']
-        createdAt: '<(new \DateTime("2024-01-01 00:00:00", new \DateTimeZone("UTC")))>'
-```
+## Custom metadata
 
-### Setter Fallback
-
-If Alice needs to instantiate a class whose required constructor arguments are unavailable, opt in to constructor
-bypass for that class when its setters can restore its state.
-
-```php
-$context = FixtureGenerationContext::create()
-    ->allowConstructorBypassFor(SetterBackedRecord::class);
-```
-
-When generation falls back to setters for that class, Alice allocates the object without calling its constructor
-and applies the emitted setter calls.
-
-### Output Format
-
-Fixtures are generated in YAML by default. To output PHP code or a custom format:
-
-```php
-use Solitus0\AliceGenerator\Generator\PhpGenerator;
-use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
-
-$generator = FixtureGeneratorBuilder::create()
-    ->setGenerator(new PhpGenerator())
-    ->build();
-
-$code = $generator->generate($objects, FixtureGenerationContext::create());
-```
-
-### Recursion Control
-
-When traversal removes a value needed by a required constructor argument, generation omits the incomplete fixture
-and fixtures that reference it. Classes configured for setter fallback can still be reconstructed when their setters
-provide the required state.
-
-### Legend
-
-| Color / Style   | Meaning                | CSS Style           |
-|-----------------|------------------------|---------------------|
-| 🟩 Green        | Passed to generator    | `fill: #aaffaa`     |
-| 🟦 Blue         | Included via traversal | `fill: #bbddff`     |
-| 🟥 Red          | Excluded               | `fill: #ffcccc`     |
-| ⬜ White         | Not visited            | `fill: #ffffff`     |
-| 🔲 Thick border | Constrained            | `stroke-width: 4px` |
-
-Limit how deep AliceGenerator traverses object graphs:
-
-```php
-$context->setMaximumRecursion(0);
-```
-![Depth 0](images/depth0.png)
-
-```php
-$context->setMaximumRecursion(1);
-```
-![Depth 1](images/depth1.png)
-
-```php
-$context->setMaximumRecursion(2);
-```
-![Depth 2](images/depth2.png)
-
-Constrain generation to specific root objects:
-
-```php
-$context->addPersistedObjectConstraint($user);
-```
-![User constrained](images/constrained_user.png)
-
-```php
-$context->addPersistedObjectConstraint([$post1, $post2]);
-```
-![Posts constrained](images/constrained2x.png)
-
-Each run groups the registered object identities using its configured metadata handler.
-The same context can be reused with different handlers.
-
-### Collection Handling
-
-Collection options apply to Doctrine collection properties. Limits count selected items per collection
-before recursion or other graph rules can prune them. Items excluded by a limit never reach the skip callbacks.
-
-Skip entire collections for owner classes:
-
-```php
-$context->addOwnersWithSkippedCollections(User::class);
-```
-![Skip owner collections](images/skip_owner_collections.png)
-
-Skip individual items via a callback:
-
-```php
-$context->addCollectionItemSkipCondition(
-    function (string $ownerClass, $item) {
-        return $item instanceof Post && $item->isDraft();
-    }
-);
-```
-![Callback for skipping items](images/callback.png)
-
-Limit the number of items in a collection:
-
-```php
-$context->addCollectionItemLimitPerOwner(User::class, 3);
-```
-![Limit first N items](images/limit3.png)
-
-```php
-$context->addLimitForOwnerItemCollection(User::class, Post::class, 2);
-```
-![Limit specific collection items](images/limit_specific_collection.png)
-
-## Custom Object Handlers
-
-To support custom types (e.g., DateTime, UUIDs), see the [Custom Object Handlers](custom-object-handlers.md) guide.
+A custom `MetadataHandlerInterface` can decide which objects and properties to export. It can also implement
+`MetadataExportPolicyInterface` to allow a nested object to become literal text and to identify the owning
+field of an inverse collection. Text conversion still depends on the [destination write route](custom-object-handlers.md).

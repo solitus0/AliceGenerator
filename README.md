@@ -15,13 +15,14 @@ Generating fixtures from records created through your application's workflows sa
 composer require solitus0/alice-generator --dev
 ```
 
-Run the [PHP quick start](./docs/getting-started.md#quick-start) to export two tasks that share one assignee. Both tasks reference the same fixture in the generated YAML.
+Run the [PHP quick start](./docs/getting-started.md#quick-start) to export two tasks that share one assignee.
+The YAML groups fixtures by fully qualified class name, and both tasks reference the same assignee fixture.
 
 ```yaml
-Assignee:
+App\Entity\Assignee:
     Assignee-1:
         name: Alex
-Task:
+App\Entity\Task:
     Task-1:
         title: 'Send invoice'
         assignee: '@Assignee-1'
@@ -36,7 +37,7 @@ Task:
 - [Configuration](./docs/configuration.md) covers Doctrine, naming, how fixtures are written, and output formats.
 - [Property transformers](./docs/property-transformers.md) replace or redact field values.
 - [Custom object handlers](./docs/custom-object-handlers.md) support value objects that need custom serialization.
-- [Recipe-based export](./docs/fixture-export.md) selects records and fields and validates the YAML before writing it. The `alice-export` command is **unreleased**.
+- [Recipe-based export](./docs/fixture-export.md) selects records and fields and validates the YAML before writing it.
 - [Changelog](./CHANGELOG.md) lists features and migration notes by release.
 
 AliceGenerator is an independently maintained fork of [trappar/AliceGenerator](https://github.com/trappar/AliceGenerator).

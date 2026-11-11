@@ -15,10 +15,12 @@ Save this example as `example.php` in your project root and run `php example.php
 ```php
 <?php
 
-require __DIR__ . '/vendor/autoload.php';
+namespace App\Entity;
 
 use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
 use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
+
+require __DIR__ . '/vendor/autoload.php';
 
 final class Assignee
 {
@@ -48,10 +50,10 @@ echo $yaml;
 ```
 
 ```yaml
-Assignee:
+App\Entity\Assignee:
     Assignee-1:
         name: Alex
-Task:
+App\Entity\Task:
     Task-1:
         title: 'Send invoice'
         assignee: '@Assignee-1'

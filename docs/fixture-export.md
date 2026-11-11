@@ -1,11 +1,11 @@
 # Recipe-based fixture export
 
-The unreleased `alice-export` command runs a project-owned PHP recipe that selects records and fields for
+The `alice-export` command runs a project-owned PHP recipe that selects records and fields for
 a test scenario. It uses the project's Alice loader to check that the selected fixture set can be reloaded.
 
 ## Prerequisites
 
-- Use a build of AliceGenerator that includes the command. See the [changelog](../CHANGELOG.md#unreleased).
+- Install AliceGenerator [v0.2.0](../CHANGELOG.md#v020-2026-11-11) or later in the consuming project.
 - Run from the consuming project with its Composer dependencies installed. The CLI needs `proc_open`
   and a writable system temporary directory.
 - The Symfony adapter needs a dev kernel, a Doctrine entity manager for the root entity, and an accessible
@@ -129,5 +129,4 @@ the generator checks that the emitted fixture writes the link and the loader res
 The loader accepts a YAML string and returns objects keyed by fixture alias. `ExportRecipe` defaults to a
 1 MiB YAML limit and accepts `maxYamlBytes` up to 8 MiB.
 
-The recipe API is experimental. Update the library and recipe together when replacing the earlier
-`objects`, `fields`, `values`, and `requiredLinks` arguments with the `records` map.
+The recipe API is experimental. Review recipe compatibility when upgrading AliceGenerator.

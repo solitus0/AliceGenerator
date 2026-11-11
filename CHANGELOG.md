@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 (2026-11-11)
 
 ### Added
 
@@ -20,6 +20,11 @@
 - The generator resolves required constructor arguments from matching properties and initialized defaults.
   Doctrine export preserves mapped relationships and composite identifiers on reload.
 - Reference names and object identity are tracked per generation run. Colliding names get distinct suffixes.
+
+### Fixed
+
+- Literal strings round-trip through Alice, including multiline HTML and text that resembles fixture syntax.
+- Fixture generation no longer emits a reflection deprecation on PHP 8.5.
 
 ### Removed
 

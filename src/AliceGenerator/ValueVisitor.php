@@ -298,7 +298,6 @@ class ValueVisitor
         bool $hasRequiredConstructorArguments,
     ): ?PreparedProperty {
         $reflection = new \ReflectionProperty($metadata->class, $metadata->name);
-        $reflection->setAccessible(true);
 
         $isInitialized = $reflection->isInitialized($object);
         $value = $isInitialized ? $reflection->getValue($object) : null;

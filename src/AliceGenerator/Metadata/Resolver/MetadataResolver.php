@@ -10,6 +10,12 @@ class MetadataResolver extends AbstractMetadataResolver
 {
     public function handle(ValueContext $valueContext): void
     {
+        self::applyOverrides($valueContext);
+    }
+
+    /** @internal */
+    public static function applyOverrides(ValueContext $valueContext): void
+    {
         if ($valueContext->getMetadata()->ignore) {
             $valueContext->setSkipped(true);
         } elseif ($valueContext->getMetadata()->staticData !== null) {

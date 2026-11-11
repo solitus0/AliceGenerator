@@ -4,10 +4,7 @@ declare(strict_types=1);
 
 namespace Solitus0\AliceGenerator\Generator;
 
-use Metadata\MetadataFactory;
-use Solitus0\AliceGenerator\Metadata\Driver\AttributeDriver;
-use Solitus0\AliceGenerator\Metadata\Provider\ClassMetadataProvider;
-use Solitus0\AliceGenerator\Metadata\Resolver\MetadataResolver;
+use Solitus0\AliceGenerator\Metadata\Provider\ReflectionClassMetadataProvider;
 use Solitus0\AliceGenerator\MetadataHandler\MetadataHandlerInterface;
 use Solitus0\AliceGenerator\MetadataHandler\NonSpecificMetadataHandler;
 use Solitus0\AliceGenerator\ObjectHandler as ObjectHandler;
@@ -25,9 +22,7 @@ class FixtureGeneratorBuilder
 
     private readonly ObjectHandlerRegistryInterface $objectHandlerRegistry;
 
-    private readonly ClassMetadataProvider $classMetadataProvider;
-
-    private readonly MetadataResolver $metadataResolver;
+    private readonly ReflectionClassMetadataProvider $classMetadataProvider;
 
     private PropertyNamerInterface $propertyNamer;
 
@@ -45,14 +40,12 @@ class FixtureGeneratorBuilder
             new ObjectHandler\CollectionHandler(),
             new ObjectHandler\DateTimeHandler(),
             new ObjectHandler\DateTimeImmutableHandler(),
-            new ObjectHandler\RamseyUuidHandler(),
             new ObjectHandler\EnumHandler(),
         ]);
 
         $this->objectHandlerRegistry = $objectHandlerRegistry;
 
-        $this->classMetadataProvider = new ClassMetadataProvider(new MetadataFactory(new AttributeDriver()));
-        $this->metadataResolver = new MetadataResolver();
+        $this->classMetadataProvider = new ReflectionClassMetadataProvider();
         $this->referenceNamer = new ClassNamer();
         $this->propertyNamer = new PropertyNamer();
     }
@@ -109,17 +102,16 @@ class FixtureGeneratorBuilder
 
     public function build(): FixtureGenerator
     {
-        return new FixtureGenerator(
-            new ValueVisitor(
-                $this->classMetadataProvider,
-                $this->handler,
-                $this->metadataResolver,
-                $this->objectHandlerRegistry,
-                $this->propertyNamer,
-                $this->referenceNamer,
-                new FixtureWriteRouteResolver(),
-            ),
-            $this->generator
+        $visitor = new ValueVisitor(
+            $this->classMetadataProvider,
+            $this->handler,
+            null,
+            $this->objectHandlerRegistry,
+            $this->propertyNamer,
+            $this->referenceNamer,
+            new FixtureWriteRouteResolver(),
         );
+
+        return new FixtureGenerator($visitor->collectRunFixtures(...), $this->generator);
     }
 }

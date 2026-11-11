@@ -1,58 +1,55 @@
 # Usage
 
-This guide demonstrates how to generate fixtures from your entities using AliceGenerator.
+Pass an object, an array of objects, or a Doctrine collection of objects to `generate()`. Use a
+`FixtureGenerationContext` to control which related objects are included. Start with the [PHP example](getting-started.md#quick-start).
 
-## Basic Usage
+## Recursion and object constraints
 
-The following example generates fixtures for an entity, including collections except those owned by the `User` class:
+Depth counts the number of relationships from the root. With `Project` as the root, a limit of `1` lets the
+generator follow its relationship to `Task`. Increase the limit to `2` to reach `Assignee`.
+
+![Project at depth 0 and Task at depth 1 are included. A dashed connection leads to Assignee at depth 2, beyond the limit.](images/traversal-depth.svg)
 
 ```php
-use Solitus0\AliceGenerator\Generator\FixtureGeneratorBuilder;
 use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
-use Solitus0\AliceGenerator\MetadataHandler\DoctrineMetadataHandler;
-
-$generator = FixtureGeneratorBuilder::create()
-    ->setMetadataHandler(new DoctrineMetadataHandler($entityManager))
-    ->build();
 
 $context = FixtureGenerationContext::create()
-    ->setMaximumRecursion(max: 2)
-    ->addPersistedObjectConstraint($entity);
+    ->setMaximumRecursion(1)
+    ->addPersistedObjectConstraint($project);
 
-$yaml = $generator->generate($entity, $context);
+$yaml = $generator->generate($project, $context);
 ```
 
-## Limiting Collections
+- The default recursion limit is `5`. Previously discovered objects can still be referenced, including links
+  back to the root.
+- `addPersistedObjectConstraint()` accepts one object or an array. For each class you constrain, the supplied
+  instances form an allowlist. Classes without a constraint remain eligible. Pass the actual object instances
+  from the graph. The method does not query the database or compare primary keys.
+- If a depth limit or constraint cuts off a value required by a constructor, the generator may omit the fixture
+  and remove references to it. See [how fixtures are written](configuration.md#how-fixtures-are-written).
 
-Restrict the number of items in all collections of the `User` entity:
+## Collection filters
+
+These options apply to Doctrine collection properties handled by the built-in collection handler.
+They do not apply to plain PHP arrays or collections passed directly to `generate()`.
+
+| Context method | Effect |
+| --- | --- |
+| `addOwnersWithSkippedCollections(Project::class)` | Skip every collection property on that owner class. Pass an array to skip several classes. |
+| `addCollectionItemLimitPerOwner(Project::class, 3)` | Keep up to three selected items per collection on that class. |
+| `addLimitForOwnerItemCollection(Project::class, Task::class, 2)` | Keep up to two items of that class per collection. |
+| `addCollectionItemSkipCondition($callback)` | Skip an item when the callback returns `true`. |
+
+Owner and item class filters match exact classes. Limits accept zero or a positive integer and apply in collection
+iteration order. Items rejected by a limit never reach the callback. Items rejected by a callback do not use
+a slot. Items selected but later pruned during traversal still count toward the limit.
 
 ```php
-$context = FixtureGenerationContext::create()
-    ->setMaximumRecursion(max: 2)
-    ->addPersistedObjectConstraint($entity)
-    ->addCollectionItemLimitPerOwner(User::class, 3);
+use App\Entity\Project;
+use App\Entity\Task;
+
+$context->addCollectionItemSkipCondition(
+    static fn (string $ownerClass, mixed $item): bool =>
+        $ownerClass === Project::class && $item instanceof Task && $item->isDraft()
+);
 ```
-
-## Conditional Skipping
-
-Skip individual items in a collection based on a custom callback:
-
-```php
-$context = FixtureGenerationContext::create()
-    ->setMaximumRecursion(max: 2)
-    ->addPersistedObjectConstraint($entity)
-    ->addLimitForOwnerItemCollection(User::class, Notification::class, 5)
-    ->addCollectionItemSkipCondition(
-        function (string $ownerClass, $item) {
-            return $item instanceof Notification && $item->getReadAt() !== null;
-        }
-    );
-```
-
-## Further Configuration
-
-AliceGenerator provides many configuration options, including naming strategies, recursion control, and collection handling. For details, see the [Configuration Guide](configuration.md).
-
-## Custom Object Handlers
-
-To support custom types beyond the built-in handlers, see the [Custom Object Handlers](custom-object-handlers.md) guide.

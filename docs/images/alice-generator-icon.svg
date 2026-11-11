@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-labelledby="title">
+  <title id="title">An orange record tile entering a folded YAML sheet</title>
+  <path d="M50 14h37l26 26v64a10 10 0 0 1-10 10H50a10 10 0 0 1-10-10V24a10 10 0 0 1 10-10Z"
+        fill="#fff0dc" stroke="#382820" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M87 14v16a10 10 0 0 0 10 10h16Z"
+        fill="#f6b46d" stroke="#382820" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M53 54h46v47H53Z" fill="#382820" stroke="#382820" stroke-width="4" stroke-linejoin="round"/>
+  <rect x="61" y="60" width="32" height="13" rx="3" fill="#ff963b"/>
+  <rect x="61" y="82" width="32" height="12" rx="3" fill="#efc79d"/>
+  <path d="M30 66.5h23m-6-6 6 6-6 6" fill="none" stroke="#a3440c" stroke-width="4"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="9" y="55" width="23" height="23" rx="5" fill="#ff963b" stroke="#382820" stroke-width="4"/>
+</svg>

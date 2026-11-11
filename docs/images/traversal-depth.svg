@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 164" width="600" height="164" role="img" aria-labelledby="title desc">
+  <title id="title">Traversal with a recursion limit of one</title>
+  <desc id="desc">Project at depth zero and Task at depth one are included. Assignee at depth two is beyond the limit.</desc>
+  <rect width="600" height="164" rx="18" fill="#fff5e8"/>
+
+  <g fill="none" stroke="#43332a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M182 82h34m-7-6 7 6-7 6"/>
+    <path d="M380 82h33" stroke-dasharray="4 5"/>
+    <path d="m407 76 7 6-7 6"/>
+  </g>
+
+  <rect x="22" y="43" width="156" height="78" rx="12" fill="#ffdfba" stroke="#a94a15" stroke-width="2"/>
+  <rect x="222" y="43" width="156" height="78" rx="12" fill="#ffdfba" stroke="#a94a15" stroke-width="2"/>
+  <rect x="422" y="43" width="156" height="78" rx="12" fill="#fffaf3" stroke="#6e5b4d" stroke-width="2" stroke-dasharray="5 4"/>
+
+  <g fill="#30251e" font-family="system-ui, sans-serif" font-size="24" font-weight="700" text-anchor="middle">
+    <text x="100" y="77">Project</text>
+    <text x="300" y="77">Task</text>
+    <text x="500" y="77">Assignee</text>
+  </g>
+  <g fill="#58463a" font-family="system-ui, sans-serif" font-size="19" text-anchor="middle">
+    <text x="100" y="104">Depth 0</text>
+    <text x="300" y="104">Depth 1</text>
+    <text x="500" y="104">Depth 2</text>
+    <text x="500" y="146">Beyond limit</text>
+  </g>
+</svg>

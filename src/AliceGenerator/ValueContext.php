@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Solitus0\AliceGenerator;
 
+use Solitus0\AliceGenerator\Generator\AliceValueEncoder;
+use Solitus0\AliceGenerator\Generator\StringableWriteMode;
 use Solitus0\AliceGenerator\Metadata\PropertyMetadata;
 
 class ValueContext
@@ -12,12 +14,16 @@ class ValueContext
 
     private bool $skipped = false;
 
+    /** @var (\Closure(bool): StringableWriteMode)|StringableWriteMode|null */
+    private \Closure|StringableWriteMode|null $stringableWriteMode = null;
+
     public function __construct(
         private mixed $value = null,
         private readonly ?string $contextObjectClass = null,
         private readonly ?object $contextObject = null,
         private readonly ?PropertyMetadata $propertyMetadata = null,
-        private readonly ?ValueVisitor $valueVisitor = null
+        private readonly ?ValueVisitor $valueVisitor = null,
+        private readonly bool $allowsStringable = false,
     ) {
     }
 
@@ -26,35 +32,80 @@ class ValueContext
         return $this->valueVisitor;
     }
 
-    public function getValue(): mixed
+    /**
+     * @internal
+     * @param iterable<mixed> $collection
+     */
+    public function visitCollection(iterable $collection): bool
     {
-        if (!$this->modified && is_string($this->value)) {
-            $s = $this->value;
-
-            // if string is raw html or xml prevent alice to interpret as evaluated expression
-            if ($s !== strip_tags($s)) {
-                //replace new lines before encoding Alice’s function argument parser treats newlines as separators
-                $s = str_replace("\n", '', $s);
-                // Step 1: escape HTML special chars (<, >, ", ')
-                $s = htmlspecialchars($s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-
-                // Step 2: revert inside Alice expression at runtime
-                return "<htmlspecialchars_decode('$s', 3)>";
-            }
-
-            // Alice tokenizes any literal $... fragment as a variable reference, so escape every unescaped dollar sign.
-            return preg_replace('/(?<!\\\\)\$/', '\\\\$', $s);
+        $visitor = $this->getValueVisitor();
+        if ($visitor === null) {
+            return false;
         }
 
+        $visitor->visitCollection($this, $collection);
+
+        return true;
+    }
+
+    public function getValue(): mixed
+    {
+        return AliceValueEncoder::unwrapExpressions($this->value);
+    }
+
+    /** @internal */
+    public function getUnencodedValue(): mixed
+    {
         return $this->value;
     }
 
-    public function setValue(mixed $value, bool $setModified = true): static
+    public function setLiteralString(string $value): void
+    {
+        $this->setSourceValue($value);
+    }
+
+    public function allowsStringable(): bool
+    {
+        return $this->getStringableWriteMode() === StringableWriteMode::Text;
+    }
+
+    /** @internal */
+    public function getStringableWriteMode(bool $arrayItem = false): StringableWriteMode
+    {
+        if ($this->allowsStringable) {
+            return StringableWriteMode::Text;
+        }
+
+        return $this->stringableWriteMode instanceof \Closure
+            ? ($this->stringableWriteMode)($arrayItem)
+            : ($this->stringableWriteMode ?? StringableWriteMode::Reference);
+    }
+
+    /**
+     * @internal
+     * @param (\Closure(bool): StringableWriteMode)|StringableWriteMode $mode
+     */
+    public function setStringableWriteMode(\Closure|StringableWriteMode $mode): void
+    {
+        $this->stringableWriteMode = $mode;
+    }
+
+    /** Store a source value for encoding when the fixture is written. */
+    public function setSourceValue(mixed $value): static
     {
         $this->value = $value;
+        $this->modified = true;
+
+        return $this;
+    }
+
+    /** Store a fixture value that may already contain Alice syntax. */
+    public function setValue(mixed $value, bool $setModified = true): static
+    {
         if ($setModified) {
             $this->modified = true;
         }
+        $this->value = $this->modified ? AliceValueEncoder::markSyntax($value) : $value;
 
         return $this;
     }

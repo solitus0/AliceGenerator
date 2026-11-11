@@ -1,28 +1,34 @@
-# Repository Guidelines
+# Repository guidelines
 
-## Project Structure & Module Organization
-Core library code lives in `src/AliceGenerator/` and is PSR-4 autoloaded under `Solitus0\AliceGenerator\`. Main areas are split by responsibility, for example `Generator/`, `MetadataHandler/`, `ObjectHandler/`, `PropertyTransformer/`, and `ReferenceNamer/`. Tests live in `tests/AliceGenerator/` with shared bootstrap logic in `tests/bootstrap.php`. Documentation is in `docs/`, and temporary analyzer output is written to `var/`.
+Library code lives in `src/AliceGenerator/` under the PSR-4 namespace `Solitus0\AliceGenerator`.
+The recipe CLI entry point is `bin/alice-export`. Tests live in `tests/AliceGenerator/` with shared setup
+in `tests/bootstrap.php`. Keep user guides in `docs/` and temporary analysis output in `var/`.
 
-## Build, Test, and Development Commands
-Install dependencies with `composer install`.
+## Local checks
 
-- `make test` runs PHPUnit 10 with `phpunit.xml.dist`.
-- `make ecs_check` runs EasyCodingStandard in check mode.
-- `make ecs` runs ECS with `--fix`.
-- `make rector` applies automated refactors from `rector.php`.
-- `make phpstan` runs static analysis and writes a report to `var/phpstan/phpstan-report.json`.
-- `make before_push` runs the full local quality gate: ECS fix, Rector, PHPStan, and tests.
+Install dependencies with `composer install` and run commands from the repository root.
+CI checks PHP 8.1. The Doctrine and export tests use `pdo_sqlite`, and the export tests also need `proc_open`.
 
-Run commands from the repository root.
+| Command | Purpose |
+| --- | --- |
+| `make test` | Run PHPUnit 10 with `phpunit.xml.dist`. |
+| `make test_coverage` | Run PHPUnit with Xdebug coverage and write HTML to `var/coverage/`. |
+| `make ecs_check` | Check coding standards. |
+| `make ecs` | Apply ECS fixes. |
+| `make rector` | Apply automated refactors. |
+| `make phpstan` | Run static analysis and write `var/phpstan/phpstan-report.json`. |
+| `make before_push` | Apply ECS and Rector changes, then run PHPStan and PHPUnit. |
 
-## Coding Style & Naming Conventions
-Target PHP is `^8.1`. Follow existing PSR-4 namespace layout and keep new classes under `src/AliceGenerator/...`. Use 4-space indentation, LF line endings, and keep lines near the configured `120` character limit from `.editorconfig`. Match existing naming: classes in `PascalCase`, methods/properties in `camelCase`, and test classes ending with `Test`. Prefer small, focused classes over cross-cutting refactors.
+Run `make test` before submitting and `make phpstan` for type and rule regressions.
+Cover behavior changes and edge cases, especially traversal, metadata, and fixture reloads.
+Name tests after the production class or behavior they exercise.
 
-## Testing Guidelines
-This project uses PHPUnit 10. Add unit tests in `tests/AliceGenerator/` and mirror the production class or feature name where practical, for example `FixtureGeneratorBuilderTest.php`. Cover behavior changes and edge cases, especially around recursion, metadata handling, and fixture serialization. Run `make test` before submitting; run `make phpstan` for type and rule regressions.
+## Changes and reviews
 
-## Commit & Pull Request Guidelines
-Recent history uses short Conventional Commit style subjects such as `fix: ...`, `feat: ...`, `docs: ...`, and `style: ...`. Keep commit messages imperative and scoped to one change. Pull requests should include a brief description, rationale, and the verification performed. Link related issues when applicable and include output examples only when behavior or generated fixtures changed.
+Target PHP `^8.1` and follow the existing namespace layout and naming conventions. Use four spaces, LF,
+and the 120-character line length from `.editorconfig`. Keep changes focused.
+Preserve backward compatibility unless the pull request documents a breaking change.
 
-## Security & Configuration Tips
-Do not commit generated reports from `var/` or local environment changes. Keep library changes backward-compatible unless the PR explicitly documents a breaking change.
+Use short, imperative Conventional Commit subjects and keep each commit scoped to one change.
+In pull requests, describe the change, why it matters, and how it was verified. Link related issues
+and include output examples when fixture output changes. Keep generated reports and local configuration out of commits.

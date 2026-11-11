@@ -1,108 +1,56 @@
-# 🔧 Property Transformation Rules
+# Property transformers
 
-Property transformation rules allow dynamic modification of object property values during fixture generation. This is useful for:
+Use a rule to replace a property value in the generated fixture. Rules leave the source object intact when
+the transformer returns a replacement or sets it on the value context.
 
-- Replacing sensitive values (e.g., passwords, emails)
-- Providing deterministic outputs for tests
-- Adjusting values to a specific range (e.g., dates)
-
----
-
-## 📦 Components
-
-### `PropertyTransformRule`
-
-Represents a single rule combining a matcher and a value transformer:
+## Replace a property value
 
 ```php
-new PropertyTransformRule(
-    PropertyMatcherInterface $matcher,
-    ValueTransformerInterface $transformer
-);
-```
-
-### `PropertyMatcherInterface`
-
-Interface for matching a property.
-
-Available implementations:
-- `PropertyMatcher` — matches by property name
-- `ClassPropertyMatcher` — matches by both class name and property name
-
-### `ValueTransformerInterface`
-
-Interface for transforming a value.
-
-```php
-public function transform(ValueContext $valueContext): void;
-```
-
-Available implementations:
-- `SimpleValueTransformer` — replaces value with a static one
-- `CallbackValueTransformer` — derives a value from the current `ValueContext`
-
----
-
-## ✅ Basic Usage Example
-
-Replace all `dateTo` values with a fixed date:
-
-```php
-$context = FixtureGenerationContext::create()
-    ->addPropertyTransformRule(
-        new PropertyTransformRule(
-            new PropertyMatcher('dateTo'),
-            new SimpleValueTransformer(new \DateTimeImmutable('+10 years'))
-        )
-    );
-```
-
----
-
-## 🧑‍💻 Example: Sanitize User Passwords
-
-Ensure all passwords are set to a safe default when generating test fixtures:
-
-```php
+use App\Entity\User;
+use Solitus0\AliceGenerator\Generator\FixtureGenerationContext;
 use Solitus0\AliceGenerator\PropertyTransformer\ClassPropertyMatcher;
-use Solitus0\AliceGenerator\PropertyTransformer\SimpleValueTransformer;
 use Solitus0\AliceGenerator\PropertyTransformer\PropertyTransformRule;
+use Solitus0\AliceGenerator\PropertyTransformer\SimpleValueTransformer;
 
-$context->addPropertyTransformRule(
-    new PropertyTransformRule(
-        new ClassPropertyMatcher(\App\Entity\User::class, 'password'),
-        new SimpleValueTransformer('test-password')
-    )
-);
+$context = FixtureGenerationContext::create()
+    ->addPropertyTransformRule(new PropertyTransformRule(
+        new ClassPropertyMatcher(User::class, 'internalNote'),
+        new SimpleValueTransformer('Redacted for tests')
+    ));
 ```
 
-> This ensures that any user password is overridden with a predictable value for login in test environments.
+Pass the context to `generate()`. For a `User` with a populated `internalNote`, the fixture contains the replacement.
 
----
+```yaml
+App\Entity\User:
+    User-1:
+        internalNote: 'Redacted for tests'
+```
 
-## ⚙️ Custom Value Transformers
+The first matching rule wins. Rules act on eligible properties before
+recursive traversal and object handling. A property skipped by the metadata handler or supplied by a metadata
+override does not pass through these rules. Redacting one field leaves other exported fields eligible.
 
-Implement your own transformer:
+## Matchers and transformers
+
+- `PropertyMatcher` matches a property name across classes. `ClassPropertyMatcher` matches an exact class and
+  property name from the property's metadata. Implement `PropertyMatcherInterface` for other matching rules.
+- `SimpleValueTransformer` uses a fixed replacement. `CallbackValueTransformer` passes a `ValueContext` to
+  your callable and uses its return value. `getValue()` returns the current value without Alice escaping.
+- A custom `ValueTransformerInterface::transform()` can set a replacement with `setSourceValue()`.
+
+## Literal values and Alice expressions
+
+The built-in transformers treat strings as literal data, even when they begin with `@` or resemble an Alice
+expression. To supply syntax intentionally, return or pass an `AliceExpression`:
 
 ```php
-use Solitus0\AliceGenerator\PropertyTransformer\ValueTransformerInterface;
-use Solitus0\AliceGenerator\ValueContext;
+use Solitus0\AliceGenerator\AliceExpression;
+use Solitus0\AliceGenerator\PropertyTransformer\SimpleValueTransformer;
 
-class RandomIntTransformer implements ValueTransformerInterface
-{
-    public function transform(ValueContext $valueContext): void
-    {
-        $valueContext->setValue(random_int(1, 100));
-    }
-}
+$transformer = new SimpleValueTransformer(AliceExpression::reference('User-1'));
 ```
 
----
-
-## 🧠 How It Works
-
-- Rules are evaluated in the order they were added.
-- The first matching rule for a property is used — no further rules are checked once a match is found.
-- If a rule's matcher applies, its transformer replaces the value.
-- Unmatched properties are left unchanged.
-- Rules are evaluated before the value is written to the fixture output and before any custom object handlers are applied.
+The referenced fixture key must exist in the load. For other syntax, use `new AliceExpression('<(1 + 2)>')`.
+In custom transformers, use `setSourceValue()` with wrapped expressions to mix literals and syntax in an array.
+`setValue()` is for values that are already in fixture syntax.

@@ -9,6 +9,7 @@ use Solitus0\AliceGenerator\MetadataHandler\MetadataHandlerInterface;
 
 abstract class AbstractCollection
 {
+    /** @var array<string, ArrayCollection> */
     private array $collections = [];
 
     public function __construct(
@@ -31,6 +32,12 @@ abstract class AbstractCollection
         }
 
         return $this->collections[$class];
+    }
+
+    /** @return array<string, ArrayCollection> */
+    protected function getClassCollections(): array
+    {
+        return $this->collections;
     }
 
     protected function determineClass(object $object): string

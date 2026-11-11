@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace Solitus0\AliceGenerator\MetadataHandler;
 
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\EntityNotFoundException;
 use Doctrine\ORM\Mapping\ClassMetadata as ORMClassMetadata;
 use Doctrine\Persistence\Mapping\ClassMetadata;
+use Solitus0\AliceGenerator\Exception\UnavailableObjectException;
 use Solitus0\AliceGenerator\ValueContext;
 
-class DoctrineMetadataHandler extends AbstractMetadataHandler
+class DoctrineMetadataHandler extends AbstractMetadataHandler implements MetadataExportPolicyInterface
 {
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -23,6 +25,11 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
         return $this->getMetadata($object) instanceof ClassMetadata;
     }
 
+    public function getObjectExportMode(object $object): ObjectExportMode
+    {
+        return ObjectExportMode::fromMetadataSupport($this->canHandle($object));
+    }
+
     protected function getMetadata(object $object): bool|ClassMetadata
     {
         try {
@@ -34,14 +41,31 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
 
     public function preHandle(object $object): void
     {
-        // Force proxy objects to load data
-        if (method_exists($object, '__load')) {
-            try {
-                $object->__load();
-            } catch (\Throwable) {
-                // ignore proxy load failures
-            }
+        try {
+            $this->entityManager->initializeObject($object);
+        } catch (EntityNotFoundException $exception) {
+            throw new UnavailableObjectException($exception->getMessage(), 0, $exception);
+        } catch (\Throwable) {
+            // Preserve the existing handling of other proxy load failures.
         }
+    }
+
+    public function findOwningFieldForInverseCollection(object $object, string $property): ?string
+    {
+        $metadata = $this->getMetadata($object);
+        if (!$metadata instanceof ORMClassMetadata
+            || !$metadata->isCollectionValuedAssociation($property)
+            || !$metadata->isAssociationInverseSide($property)
+        ) {
+            return null;
+        }
+
+        $owningField = $metadata->getAssociationMappedByTargetField($property);
+        $target = $this->entityManager->getClassMetadata($metadata->getAssociationTargetClass($property));
+
+        return $target->isSingleValuedAssociation($owningField) && !$target->isAssociationInverseSide($owningField)
+            ? $owningField
+            : null;
     }
 
     public function shouldSkipProperty(ValueContext $valueContext): bool
@@ -94,11 +118,12 @@ class DoctrineMetadataHandler extends AbstractMetadataHandler
         $mapped = $isMappedField || $isMappedAssoc || $isEmbedded;
 
         // 3) Optionally skip empty strings for nullable scalar fields
+        $value = $valueContext->getUnencodedValue();
         if (
             $this->skipEmptyStrings
             && $isMappedField
-            && is_string($valueContext->getValue())
-            && trim($valueContext->getValue()) === ''
+            && is_string($value)
+            && trim($value) === ''
         ) {
             $fieldMapping = $classMetadata->getFieldMapping($propName);
             $nullable = $fieldMapping['nullable'] ?? false;

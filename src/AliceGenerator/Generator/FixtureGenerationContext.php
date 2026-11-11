@@ -12,6 +12,8 @@ use Solitus0\AliceGenerator\Storage\ObjectConstraintsCollection;
 
 class FixtureGenerationContext
 {
+    private FixtureGenerationPolicy $generationPolicy;
+
     private readonly ObjectConstraintsCollection $constraintsCollection;
 
     private readonly PropertyTransformRulesCollection $transformRulesCollection;
@@ -23,6 +25,9 @@ class FixtureGenerationContext
      * If true, only writable properties will be included in the generated fixture.
      */
     private bool $skipNonWritableProperties = true;
+
+    /** @var array<class-string, true> */
+    private array $constructorBypassClasses = [];
 
     /**
      * @var callable[] Callbacks to skip specific collection items.
@@ -53,6 +58,7 @@ class FixtureGenerationContext
 
     public function __construct()
     {
+        $this->generationPolicy = new FixtureGenerationPolicy();
         $this->constraintsCollection = new ObjectConstraintsCollection(new NonSpecificMetadataHandler());
         $this->transformRulesCollection = new PropertyTransformRulesCollection();
     }
@@ -60,6 +66,20 @@ class FixtureGenerationContext
     public static function create(): self
     {
         return new self();
+    }
+
+    /** @internal */
+    public function setGenerationPolicy(FixtureGenerationPolicy $policy): self
+    {
+        $this->generationPolicy = $policy;
+
+        return $this;
+    }
+
+    /** @internal */
+    public function getGenerationPolicy(): FixtureGenerationPolicy
+    {
+        return $this->generationPolicy;
     }
 
     public function getMaximumRecursion(): int
@@ -221,6 +241,20 @@ class FixtureGenerationContext
         $this->skipNonWritableProperties = $skipNonWritableProperties;
 
         return $this;
+    }
+
+    /** @param class-string $class */
+    public function allowConstructorBypassFor(string $class): static
+    {
+        $this->constructorBypassClasses[$class] = true;
+
+        return $this;
+    }
+
+    /** @param class-string $class */
+    public function allowsConstructorBypassFor(string $class): bool
+    {
+        return isset($this->constructorBypassClasses[$class]);
     }
 
     public function getTransformRulesCollection(): PropertyTransformRulesCollection

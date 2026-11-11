@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Solitus0\AliceGenerator\ObjectHandler;
 
+use Solitus0\AliceGenerator\Generator\AliceValueEncoder;
 use Solitus0\AliceGenerator\ValueContext;
 
 class DateTimeImmutableHandler implements ObjectHandlerInterface
@@ -16,24 +17,7 @@ class DateTimeImmutableHandler implements ObjectHandlerInterface
             return false;
         }
 
-        $formatted = $value->format('Y-m-d H:i:s');
-
-        if (str_contains($formatted, ' 00:00:00')) {
-            $valueContext->setValue(
-                sprintf(
-                    '<(new \DateTimeImmutable("%s"))>',
-                    str_replace(' 00:00:00', '', $formatted)
-                )
-            );
-        } else {
-            $valueContext->setValue(
-                sprintf(
-                    '<(new \DateTimeImmutable("%s", new \DateTimeZone("%s")))>',
-                    $formatted,
-                    $value->getTimezone()->getName()
-                )
-            );
-        }
+        $valueContext->setSourceValue(AliceValueEncoder::dateExpression($value));
 
         return true;
     }

@@ -1,0 +1,60 @@
+Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\Assignee:
+    assignee_alex:
+        id: '00000000-0000-4000-8000-000000000001'
+        name: Alex
+    assignee_sam:
+        id: '00000000-0000-4000-8000-000000000002'
+        name: Sam
+
+Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\Project:
+    project_fixture_export:
+        name: Fixture export
+        summary: ''
+        watchers: ['@assignee_alex', '@assignee_sam']
+    project_other:
+        name: Other project
+
+Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\Task:
+    task_draft:
+        title: Draft outline
+        project: '@project_fixture_export'
+        assignee: '@assignee_alex'
+        status: '<(Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\TaskStatus::Draft)>'
+    task_design:
+        title: Design API
+        project: '@project_fixture_export'
+        assignee: '@assignee_alex'
+        status: '<(Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\TaskStatus::Published)>'
+        dueAt: '<(new \DateTimeImmutable("2026-04-21 10:30:00"))>'
+    task_implement:
+        title: Implement export
+        project: '@project_fixture_export'
+        assignee: '@assignee_alex'
+        status: '<(Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\TaskStatus::Published)>'
+    task_review:
+        title: Review
+        project: '@project_fixture_export'
+        assignee: '@assignee_sam'
+        status: '<(Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\TaskStatus::Published)>'
+    task_other:
+        title: Other task
+        project: '@project_other'
+        assignee: '@assignee_sam'
+        status: '<(Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\TaskStatus::Published)>'
+
+Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\Comment:
+    comment_design:
+        id: 201
+        body: Keep references stable
+        task: '@task_design'
+
+Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\CommentModeration:
+    moderation_design:
+        comment: '@comment_design'
+        decision: approved
+
+Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\LocalizedLabel:
+    label_lt:
+        catalogId: '00000000-0000-4000-8000-000000000003'
+        locale: lt
+        text: '<(new Solitus0\AliceGenerator\Tests\Doctrine\Fixtures\LabelText("Užduotis", "Aprašo tekstas"))>'

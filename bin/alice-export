@@ -1,0 +1,14 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Solitus0\AliceGenerator\Export\ExportCommand;
+
+require __DIR__ . '/../src/AliceGenerator/Export/ExportCommand.php';
+
+exit(ExportCommand::run(
+    array_slice($argv, 1),
+    $_composer_autoload_path ?? __DIR__ . '/../vendor/autoload.php',
+    __DIR__ . '/alice-export-worker.php',
+));
